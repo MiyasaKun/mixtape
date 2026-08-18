@@ -1,0 +1,11 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message",
+  "app_title": "Discord Music Bot",
+  "welcome_message": "Welcome",
+  "welcome_description": "Control your Discord music bot from this web interface.",
+  "go_to_dashboard": "Go to Dashboard",
+  "test_route": "Test Route",
+  "dashboard_title": "Dashboard",
+  "dashboard_description": "Music bot controls will go here.",
+  "back_to_home": "Back to home"
+}

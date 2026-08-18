@@ -1,0 +1,1154 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Discord Music Bot API",
+    "description": "REST API for controlling the Discord Music Bot. Manage playback, queue, guild configuration, and Spotify integration.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "API Support"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Health check endpoints"
+    },
+    {
+      "name": "queue",
+      "description": "Queue management endpoints"
+    },
+    {
+      "name": "playback",
+      "description": "Playback control endpoints"
+    },
+    {
+      "name": "config",
+      "description": "Guild configuration endpoints"
+    },
+    {
+      "name": "user",
+      "description": "User preferences endpoints"
+    },
+    {
+      "name": "auth",
+      "description": "Authentication endpoints (Spotify OAuth)"
+    },
+    {
+      "name": "search",
+      "description": "Track search endpoints"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Health check",
+        "description": "Returns the health status of the API",
+        "operationId": "healthCheck",
+        "responses": {
+          "200": {
+            "description": "API is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/queue": {
+      "get": {
+        "tags": ["queue"],
+        "summary": "Get current queue",
+        "description": "Returns the current queue for a guild",
+        "operationId": "getQueue",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Guild not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["queue"],
+        "summary": "Add track to queue",
+        "description": "Adds a track to the guild's queue",
+        "operationId": "addToQueue",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddToQueueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Track added to queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/queue/{index}": {
+      "delete": {
+        "tags": ["queue"],
+        "summary": "Remove track from queue",
+        "description": "Removes a track from the queue at the specified index",
+        "operationId": "removeFromQueue",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "description": "Index of the track to remove",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Track removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Track not found at index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/queue/reorder": {
+      "put": {
+        "tags": ["queue"],
+        "summary": "Reorder queue",
+        "description": "Reorders tracks in the queue",
+        "operationId": "reorderQueue",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderQueueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Queue reordered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/playback/play": {
+      "post": {
+        "tags": ["playback"],
+        "summary": "Play or resume",
+        "description": "Starts or resumes playback. Optionally provide a URL or query to play.",
+        "operationId": "play",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Playback started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackStateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/playback/pause": {
+      "post": {
+        "tags": ["playback"],
+        "summary": "Pause playback",
+        "description": "Pauses the current playback",
+        "operationId": "pause",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playback paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackStateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/playback/skip": {
+      "post": {
+        "tags": ["playback"],
+        "summary": "Skip track",
+        "description": "Skips to the next track in the queue",
+        "operationId": "skip",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Track skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackStateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/playback/seek": {
+      "post": {
+        "tags": ["playback"],
+        "summary": "Seek to position",
+        "description": "Seeks to a specific position in the current track",
+        "operationId": "seek",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeekRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seeked to position",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackStateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid position",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/playback/volume": {
+      "put": {
+        "tags": ["playback"],
+        "summary": "Set volume",
+        "description": "Sets the playback volume (0-100)",
+        "operationId": "setVolume",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VolumeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Volume set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackStateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid volume",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/guilds/{guildId}/config": {
+      "get": {
+        "tags": ["config"],
+        "summary": "Get guild config",
+        "description": "Returns the configuration for a guild",
+        "operationId": "getGuildConfig",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Guild configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuildConfigResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Guild not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["config"],
+        "summary": "Update guild config",
+        "description": "Updates the configuration for a guild",
+        "operationId": "updateGuildConfig",
+        "parameters": [
+          {
+            "name": "guildId",
+            "in": "path",
+            "required": true,
+            "description": "Discord guild (server) ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGuildConfigRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuildConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{userId}/preferences": {
+      "get": {
+        "tags": ["user"],
+        "summary": "Get user preferences",
+        "description": "Returns the preferences for a user",
+        "operationId": "getUserPreferences",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "description": "Discord user ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["user"],
+        "summary": "Update user preferences",
+        "description": "Updates the preferences for a user",
+        "operationId": "updateUserPreferences",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "description": "Discord user ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPreferencesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferencesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/spotify/url": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Get Spotify auth URL",
+        "description": "Returns the Spotify OAuth authorization URL",
+        "operationId": "getSpotifyAuthUrl",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "description": "Discord user ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorization URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpotifyAuthUrlResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/spotify/callback": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Spotify OAuth callback",
+        "description": "Handles the Spotify OAuth callback",
+        "operationId": "spotifyCallback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "description": "Authorization code from Spotify",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "description": "State parameter for CSRF protection",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to frontend after successful auth"
+          },
+          "400": {
+            "description": "Invalid callback parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/spotify": {
+      "delete": {
+        "tags": ["auth"],
+        "summary": "Disconnect Spotify",
+        "description": "Disconnects the user's Spotify account",
+        "operationId": "disconnectSpotify",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "description": "Discord user ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Spotify disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "post": {
+        "tags": ["search"],
+        "summary": "Search tracks",
+        "description": "Searches for tracks across supported sources",
+        "operationId": "searchTracks",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          }
+        }
+      },
+      "Track": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique track identifier"
+          },
+          "title": {
+            "type": "string",
+            "description": "Track title"
+          },
+          "artist": {
+            "type": "string",
+            "description": "Track artist"
+          },
+          "duration": {
+            "type": "integer",
+            "description": "Duration in milliseconds"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["youtube", "spotify", "soundcloud"],
+            "description": "Source platform"
+          },
+          "url": {
+            "type": "string",
+            "description": "Original URL"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "description": "Thumbnail image URL"
+          }
+        },
+        "required": ["id", "title", "source"]
+      },
+      "Queue": {
+        "type": "object",
+        "properties": {
+          "guildId": {
+            "type": "string",
+            "description": "Discord guild ID"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            }
+          },
+          "currentIndex": {
+            "type": "integer",
+            "description": "Index of the currently playing track"
+          },
+          "loopMode": {
+            "type": "string",
+            "enum": ["off", "single", "all"],
+            "description": "Loop mode"
+          }
+        }
+      },
+      "QueueResponse": {
+        "type": "object",
+        "properties": {
+          "queue": {
+            "$ref": "#/components/schemas/Queue"
+          }
+        }
+      },
+      "AddToQueueRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Track URL (YouTube, Spotify, SoundCloud)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query if no URL provided"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["youtube", "spotify", "soundcloud"],
+            "description": "Source to search (used with query)"
+          }
+        }
+      },
+      "ReorderQueueRequest": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "integer",
+            "description": "Source index"
+          },
+          "to": {
+            "type": "integer",
+            "description": "Destination index"
+          }
+        },
+        "required": ["from", "to"]
+      },
+      "PlaybackState": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": ["playing", "paused", "stopped"],
+            "description": "Current playback state"
+          },
+          "currentTrack": {
+            "$ref": "#/components/schemas/Track"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Current position in milliseconds"
+          },
+          "volume": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Current volume"
+          }
+        }
+      },
+      "PlaybackStateResponse": {
+        "type": "object",
+        "properties": {
+          "playback": {
+            "$ref": "#/components/schemas/PlaybackState"
+          }
+        }
+      },
+      "PlayRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Track URL to play"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query to play"
+          }
+        }
+      },
+      "SeekRequest": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "integer",
+            "description": "Position in milliseconds"
+          }
+        },
+        "required": ["position"]
+      },
+      "VolumeRequest": {
+        "type": "object",
+        "properties": {
+          "volume": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Volume level (0-100)"
+          }
+        },
+        "required": ["volume"]
+      },
+      "GuildConfig": {
+        "type": "object",
+        "properties": {
+          "guildId": {
+            "type": "string",
+            "description": "Discord guild ID"
+          },
+          "textChannelId": {
+            "type": "string",
+            "description": "Text channel for bot commands"
+          },
+          "voiceChannelId": {
+            "type": "string",
+            "description": "Voice channel for playback"
+          },
+          "defaultVolume": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Default volume level"
+          },
+          "autoPlay": {
+            "type": "boolean",
+            "description": "Auto-play next track"
+          },
+          "djRoleId": {
+            "type": "string",
+            "description": "DJ role ID for restricted commands"
+          }
+        }
+      },
+      "GuildConfigResponse": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/GuildConfig"
+          }
+        }
+      },
+      "UpdateGuildConfigRequest": {
+        "type": "object",
+        "properties": {
+          "textChannelId": {
+            "type": "string",
+            "description": "Text channel for bot commands"
+          },
+          "voiceChannelId": {
+            "type": "string",
+            "description": "Voice channel for playback"
+          },
+          "defaultVolume": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Default volume level"
+          },
+          "autoPlay": {
+            "type": "boolean",
+            "description": "Auto-play next track"
+          },
+          "djRoleId": {
+            "type": "string",
+            "description": "DJ role ID for restricted commands"
+          }
+        }
+      },
+      "UserPreferences": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "Discord user ID"
+          },
+          "spotifyConnected": {
+            "type": "boolean",
+            "description": "Whether Spotify is connected"
+          },
+          "preferredSource": {
+            "type": "string",
+            "enum": ["youtube", "spotify", "soundcloud"],
+            "description": "Preferred music source"
+          },
+          "locale": {
+            "type": "string",
+            "description": "User locale (e.g., en, de)"
+          }
+        }
+      },
+      "UserPreferencesResponse": {
+        "type": "object",
+        "properties": {
+          "preferences": {
+            "$ref": "#/components/schemas/UserPreferences"
+          }
+        }
+      },
+      "UpdateUserPreferencesRequest": {
+        "type": "object",
+        "properties": {
+          "preferredSource": {
+            "type": "string",
+            "enum": ["youtube", "spotify", "soundcloud"],
+            "description": "Preferred music source"
+          },
+          "locale": {
+            "type": "string",
+            "description": "User locale (e.g., en, de)"
+          }
+        }
+      },
+      "SpotifyAuthUrlResponse": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Spotify OAuth authorization URL"
+          }
+        }
+      },
+      "SearchRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["youtube", "spotify", "soundcloud"],
+            "description": "Source to search"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Maximum number of results"
+          }
+        },
+        "required": ["query"]
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            }
+          }
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "code": {
+            "type": "string",
+            "description": "Error code"
+          }
+        }
+      }
+    }
+  }
+}

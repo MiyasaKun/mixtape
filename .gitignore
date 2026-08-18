@@ -1,0 +1,25 @@
+# Binaries
+app
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Environment
+.env
+
+# Go
+go.sum
+
+# IDE
+.idea/
+
+# Template build
+template/node_modules/
+template/.svelte-kit/
+template/build/
+template/dist/
+
+# OS
+.DS_Store
+Thumbs.db
