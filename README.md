@@ -17,7 +17,7 @@ A Discord music bot with web dashboard, built with Go (Fiber) and SvelteKit.
 - **Frontend**: SvelteKit with TailwindCSS
 - **Database**: PostgreSQL
 - **Cache**: Redis
-- **Discord**: discordgo
+- **Discord**: DisGo
 
 ## Requirements
 

@@ -1,10 +1,15 @@
 package commands
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"fiber_test/internal/adapters/inbound/discord"
 	"fiber_test/internal/application/services"
 
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/snowflake/v2"
 )
 
 type PlayCommand struct {
@@ -28,7 +33,7 @@ func (c *PlayCommand) Description() string {
 func (c *PlayCommand) Options() []discord.CommandOption {
 	return []discord.CommandOption{
 		{
-			Type:        discordgo.ApplicationCommandOptionString,
+			Type:        dgo.ApplicationCommandOptionTypeString,
 			Name:        "url",
 			Description: "Track URL or search query",
 			Required:    true,
@@ -37,12 +42,47 @@ func (c *PlayCommand) Options() []discord.CommandOption {
 }
 
 func (c *PlayCommand) Handle(ctx *discord.CommandContext) error {
-	url := ctx.GetString("url")
-	guildID := ctx.GuildID()
+	err := ctx.Defer()
 
-	if err := c.musicPlayback.Play(ctx.Ctx, guildID, url); err != nil {
-		return ctx.Respond("❌ Failed to play: " + err.Error())
+	if err != nil {
+		return err
 	}
 
-	return ctx.Respond("🎵 Now playing: " + url)
+	url := ctx.GetString("url")
+
+	guildID := ctx.GuildID()
+	if guildID == "" {
+		return ctx.EditResponse("❌ `/play` can only be used in a server")
+	}
+	userId := ctx.Interaction.User().ID
+
+	parsedGuildID, err := snowflake.Parse(guildID)
+	if err != nil {
+		return ctx.EditResponse("❌ Invalid server ID: " + err.Error())
+	}
+
+	// Get the Voice State of the Requesting User
+	voiceState, ok := ctx.Client.Caches.VoiceState(parsedGuildID, userId)
+	if !ok || voiceState.ChannelID == nil {
+		return ctx.EditResponse("❌ Join a voice channel before using `/play`")
+	}
+
+	//Generate a Connection for the Discord Guild
+	conn := ctx.Client.VoiceManager.CreateConn(parsedGuildID)
+	openCtx, cancel := context.WithTimeout(ctx.Ctx, 15*time.Second)
+	defer cancel()
+
+	// Use Connection to connect to Channel using DAVE
+	err = conn.Open(openCtx, *voiceState.ChannelID, false, true)
+
+	if err != nil {
+		conn.Close(context.Background())
+		return ctx.EditResponse(fmt.Sprintf("❌ Couldn't connect to voice: %v", err))
+	}
+	// TODO: Implement Play Function
+	if err := c.musicPlayback.Play(ctx.Ctx, guildID, url); err != nil {
+		return ctx.EditResponse("❌ Failed to play: " + err.Error())
+	}
+
+	return ctx.EditResponse("🎵 Now playing: " + url)
 }

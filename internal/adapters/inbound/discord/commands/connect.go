@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"context"
 	"fiber_test/internal/adapters/inbound/discord"
 	"fiber_test/internal/application/services"
+	"time"
 
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/snowflake/v2"
 )
 
 type ConnectCommand struct {
@@ -28,7 +31,7 @@ func (c *ConnectCommand) Description() string {
 func (c *ConnectCommand) Options() []discord.CommandOption {
 	return []discord.CommandOption{
 		{
-			Type:        discordgo.ApplicationCommandOptionChannel,
+			Type:        dgo.ApplicationCommandOptionTypeChannel,
 			Name:        "channel",
 			Description: "Voice channel to connect to",
 			Required:    true,
@@ -37,12 +40,31 @@ func (c *ConnectCommand) Options() []discord.CommandOption {
 }
 
 func (c *ConnectCommand) Handle(ctx *discord.CommandContext) error {
-	guildID := ctx.GuildID()
-	channelID := ctx.GetString("channel")
+	// Defer for more time to run functions
+	err := ctx.Defer()
 
-	if err := c.guildConfig.SetVoiceChannel(ctx.Ctx, guildID, channelID); err != nil {
-		return ctx.Respond("❌ Failed to connect: " + err.Error())
+	if err != nil {
+		return err
 	}
 
-	return ctx.Respond("✅ Connected to voice channel")
+	guildID := ctx.GuildID()
+	parsedGuildId, _ := snowflake.Parse(guildID)
+	channelID := ctx.GetString("channel")
+	parsedChannelId, _ := snowflake.Parse(channelID)
+
+	// Generate a Connection to connect against
+	conn := ctx.Client.VoiceManager.CreateConn(parsedGuildId)
+	openCtx, cancel := context.WithTimeout(ctx.Ctx, time.Second*5)
+
+	defer cancel()
+
+	//Connect to Voice Channel
+	err = conn.Open(openCtx, parsedChannelId, false, false)
+
+	if err != nil {
+		conn.Close(context.Background())
+		return ctx.EditResponse("Error while connecting to the voice channel")
+	}
+
+	return ctx.EditResponse("✅ Connected to voice channel")
 }

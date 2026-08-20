@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
 )
 
 type Command interface {
@@ -15,18 +17,19 @@ type Command interface {
 }
 
 type CommandOption struct {
-	Type        discordgo.ApplicationCommandOptionType
+	Type        discord.ApplicationCommandOptionType
 	Name        string
 	Description string
 	Required    bool
-	Choices     []*discordgo.ApplicationCommandOptionChoice
+	Choices     []discord.ApplicationCommandOptionChoice
 }
 
 type CommandContext struct {
-	Session     *discordgo.Session
-	Interaction *discordgo.InteractionCreate
+	Client      *bot.Client
+	Interaction *events.ApplicationCommandInteractionCreate
 	Ctx         context.Context
 	Options     map[string]interface{}
+	deferred    bool
 }
 
 func (c *CommandContext) GetString(name string) string {
@@ -57,87 +60,193 @@ func (c *CommandContext) GetBool(name string) bool {
 }
 
 func (c *CommandContext) Respond(content string) error {
-	return c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: content,
-		},
+	if c.deferred {
+		return c.EditResponse(content)
+	}
+
+	return c.Interaction.Respond(discord.InteractionResponseTypeCreateMessage, discord.MessageCreate{
+		Content: content,
 	})
 }
 
 func (c *CommandContext) RespondEmbed(title, description string) error {
-	return c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Title:       title,
-					Description: description,
-					Color:       0x5865F2,
-				},
+	return c.Interaction.Respond(discord.InteractionResponseTypeCreateMessage, discord.MessageCreate{
+		Embeds: []discord.Embed{
+			{
+				Title:       title,
+				Description: description,
+				Color:       0x5865F2,
 			},
 		},
 	})
 }
 
 func (c *CommandContext) Defer() error {
-	return c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-	})
+	err := c.Interaction.Respond(discord.InteractionResponseTypeDeferredCreateMessage, nil)
+	if err == nil {
+		c.deferred = true
+	}
+	return err
 }
 
 func (c *CommandContext) EditResponse(content string) error {
-	_, err := c.Session.InteractionResponseEdit(c.Interaction.Interaction, &discordgo.WebhookEdit{
+	_, err := c.Client.Rest.UpdateInteractionResponse(c.Client.ApplicationID, c.Interaction.Token(), discord.MessageUpdate{
 		Content: &content,
 	})
 	return err
 }
 
 func (c *CommandContext) GuildID() string {
-	return c.Interaction.GuildID
+	if guildID := c.Interaction.GuildID(); guildID != nil {
+		return guildID.String()
+	}
+	return ""
 }
 
 func (c *CommandContext) UserID() string {
-	return c.Interaction.Member.User.ID
+	return c.Interaction.User().ID.String()
 }
 
 func (c *CommandContext) ChannelID() string {
-	return c.Interaction.ChannelID
+	return c.Interaction.Channel().ID().String()
 }
 
-func commandToDiscord(cmd Command) *discordgo.ApplicationCommand {
-	opts := make([]*discordgo.ApplicationCommandOption, len(cmd.Options()))
+func commandToDiscord(cmd Command) discord.ApplicationCommandCreate {
+	opts := make([]discord.ApplicationCommandOption, len(cmd.Options()))
 	for i, opt := range cmd.Options() {
-		opts[i] = &discordgo.ApplicationCommandOption{
-			Type:        opt.Type,
-			Name:        opt.Name,
-			Description: opt.Description,
-			Required:    opt.Required,
-			Choices:     opt.Choices,
-		}
+		opts[i] = optionToDiscord(opt)
 	}
 
-	return &discordgo.ApplicationCommand{
+	return discord.SlashCommandCreate{
 		Name:        cmd.Name(),
 		Description: cmd.Description(),
 		Options:     opts,
 	}
 }
 
-func parseOptions(i *discordgo.InteractionCreate) map[string]interface{} {
-	options := make(map[string]interface{})
-	data := i.ApplicationCommandData()
+func optionToDiscord(opt CommandOption) discord.ApplicationCommandOption {
+	switch opt.Type {
+	case discord.ApplicationCommandOptionTypeString:
+		return discord.ApplicationCommandOptionString{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+			Choices:     choicesToString(opt.Choices),
+		}
+	case discord.ApplicationCommandOptionTypeInt:
+		return discord.ApplicationCommandOptionInt{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+			Choices:     choicesToInt(opt.Choices),
+		}
+	case discord.ApplicationCommandOptionTypeBool:
+		return discord.ApplicationCommandOptionBool{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	case discord.ApplicationCommandOptionTypeFloat:
+		return discord.ApplicationCommandOptionFloat{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+			Choices:     choicesToFloat(opt.Choices),
+		}
+	case discord.ApplicationCommandOptionTypeChannel:
+		return discord.ApplicationCommandOptionChannel{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	case discord.ApplicationCommandOptionTypeUser:
+		return discord.ApplicationCommandOptionUser{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	case discord.ApplicationCommandOptionTypeRole:
+		return discord.ApplicationCommandOptionRole{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	case discord.ApplicationCommandOptionTypeMentionable:
+		return discord.ApplicationCommandOptionMentionable{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	case discord.ApplicationCommandOptionTypeAttachment:
+		return discord.ApplicationCommandOptionAttachment{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	default:
+		return discord.ApplicationCommandOptionString{
+			Name:        opt.Name,
+			Description: opt.Description,
+			Required:    opt.Required,
+		}
+	}
+}
 
-	for _, opt := range data.Options {
+func choicesToString(choices []discord.ApplicationCommandOptionChoice) []discord.ApplicationCommandOptionChoiceString {
+	if len(choices) == 0 {
+		return nil
+	}
+	result := make([]discord.ApplicationCommandOptionChoiceString, 0, len(choices))
+	for _, choice := range choices {
+		if c, ok := choice.(discord.ApplicationCommandOptionChoiceString); ok {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+func choicesToInt(choices []discord.ApplicationCommandOptionChoice) []discord.ApplicationCommandOptionChoiceInt {
+	if len(choices) == 0 {
+		return nil
+	}
+	result := make([]discord.ApplicationCommandOptionChoiceInt, 0, len(choices))
+	for _, choice := range choices {
+		if c, ok := choice.(discord.ApplicationCommandOptionChoiceInt); ok {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+func choicesToFloat(choices []discord.ApplicationCommandOptionChoice) []discord.ApplicationCommandOptionChoiceFloat {
+	if len(choices) == 0 {
+		return nil
+	}
+	result := make([]discord.ApplicationCommandOptionChoiceFloat, 0, len(choices))
+	for _, choice := range choices {
+		if c, ok := choice.(discord.ApplicationCommandOptionChoiceFloat); ok {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+func parseOptions(e *events.ApplicationCommandInteractionCreate) map[string]interface{} {
+	options := make(map[string]interface{})
+	data := e.SlashCommandInteractionData()
+
+	for _, opt := range data.All() {
 		switch opt.Type {
-		case discordgo.ApplicationCommandOptionString:
-			options[opt.Name] = opt.StringValue()
-		case discordgo.ApplicationCommandOptionInteger:
-			options[opt.Name] = int(opt.IntValue())
-		case discordgo.ApplicationCommandOptionBoolean:
-			options[opt.Name] = opt.BoolValue()
-		case discordgo.ApplicationCommandOptionNumber:
-			options[opt.Name] = opt.FloatValue()
+		case discord.ApplicationCommandOptionTypeString:
+			options[opt.Name] = opt.String()
+		case discord.ApplicationCommandOptionTypeInt:
+			options[opt.Name] = opt.Int()
+		case discord.ApplicationCommandOptionTypeBool:
+			options[opt.Name] = opt.Bool()
+		case discord.ApplicationCommandOptionTypeFloat:
+			options[opt.Name] = opt.Float()
+		case discord.ApplicationCommandOptionTypeChannel, discord.ApplicationCommandOptionTypeUser, discord.ApplicationCommandOptionTypeRole, discord.ApplicationCommandOptionTypeMentionable:
+			options[opt.Name] = opt.Snowflake().String()
 		}
 	}
 

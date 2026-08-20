@@ -220,7 +220,7 @@ type CacheRepository interface {
 ### Driven Adapters (Output)
 **Discord Gateway Adapter:**
 - Implements `DiscordRepository`
-- Uses discordgo library
+- Uses DisGo library
 
 **Spotify API Adapter:**
 - Implements `SpotifyRepository`
@@ -246,7 +246,7 @@ type CacheRepository interface {
 
 ### Backend (Go)
 - **Framework:** Fiber v3
-- **Discord:** discordgo
+- **Discord:** DisGo
 - **Database:** PostgreSQL + pgx
 - **Cache:** Redis
 - **Audio Processing:** yt-dlp (external binary)

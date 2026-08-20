@@ -12,6 +12,8 @@ type Logger struct {
 	*slog.Logger
 }
 
+var Log *slog.Logger
+
 func NewLogger(env string) *Logger {
 	var handler slog.Handler
 
@@ -25,6 +27,8 @@ func NewLogger(env string) *Logger {
 			TimeFormat: time.RFC1123,
 		})
 	}
+
+	Log = slog.New(handler)
 
 	return &Logger{
 		Logger: slog.New(handler),

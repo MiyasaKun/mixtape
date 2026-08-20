@@ -6,7 +6,7 @@ import (
 	"fiber_test/internal/adapters/inbound/discord"
 	"fiber_test/internal/application/services"
 
-	"github.com/bwmarrin/discordgo"
+	dgo "github.com/disgoorg/disgo/discord"
 )
 
 type VolumeCommand struct {
@@ -30,7 +30,7 @@ func (c *VolumeCommand) Description() string {
 func (c *VolumeCommand) Options() []discord.CommandOption {
 	return []discord.CommandOption{
 		{
-			Type:        discordgo.ApplicationCommandOptionInteger,
+			Type:        dgo.ApplicationCommandOptionTypeInt,
 			Name:        "level",
 			Description: "Volume level (0-100)",
 			Required:    true,
