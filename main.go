@@ -47,7 +47,7 @@ func main() {
 
 	trackResolver := services.NewTrackResolverService(youtubeClient, spotifyClient, soundcloudClient)
 	queueService := services.NewQueueService(cache)
-	musicPlayback := services.NewMusicPlaybackService(queueService, trackResolver)
+	musicPlayback := services.NewMusicPlaybackService(queueService, trackResolver, youtubeClient)
 	guildConfigService := services.NewGuildConfigService(db)
 	spotifyIntegration := services.NewSpotifyIntegrationService(spotifyClient, db)
 
@@ -74,7 +74,7 @@ func main() {
 		commands.NewPlayCommand(musicPlayback),
 		commands.NewSkipCommand(musicPlayback),
 		commands.NewPauseCommand(musicPlayback),
-		commands.NewQueueCommand(queueService),
+		commands.NewQueueCommand(musicPlayback, queueService),
 		commands.NewVolumeCommand(musicPlayback),
 		commands.NewNowPlayingCommand(musicPlayback),
 		commands.NewConnectCommand(guildConfigService),

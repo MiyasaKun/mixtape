@@ -2,52 +2,293 @@ package services
 
 import (
 	"context"
+	"errors"
+	"sync"
+
+	"fiber_test/internal/adapters/outbound/youtube"
+	"fiber_test/internal/application/ports"
 )
 
+// MusicPlaybackService orchestrates audio playback for every guild the bot
+// serves. It resolves requested tracks, keeps them in the queue, streams
+// them to the guild's voice connection and automatically advances to the
+// next track when the current one finishes.
 type MusicPlaybackService struct {
 	queue         *QueueService
 	trackResolver *TrackResolverService
+	streamer      *youtube.YouTube
+
+	mu      sync.Mutex
+	players map[string]*player
 }
 
-func NewMusicPlaybackService(queue *QueueService, trackResolver *TrackResolverService) *MusicPlaybackService {
+// player holds the playback state for a single guild.
+type player struct {
+	// advanceMu serializes the "advance to next track" decision so that
+	// concurrent triggers (track end, /skip) cannot both advance.
+	advanceMu sync.Mutex
+
+	conn     ports.AudioConn
+	current  *Track
+	provider ports.FrameProvider
+	playing  bool
+	// cancel aborts the background wait for the currently playing provider.
+	cancel context.CancelFunc
+	// gen is bumped every time a new track starts or a skip happens. A
+	// waiting goroutine captures the generation of its own track and bails
+	// out if the generation has moved on (stale auto-advance).
+	gen int
+}
+
+// NewMusicPlaybackService builds the playback service from its dependencies.
+func NewMusicPlaybackService(queue *QueueService, trackResolver *TrackResolverService, streamer *youtube.YouTube) *MusicPlaybackService {
 	return &MusicPlaybackService{
 		queue:         queue,
 		trackResolver: trackResolver,
+		streamer:      streamer,
+		players:       make(map[string]*player),
 	}
 }
 
-func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query string) error {
-	return nil
+// SetVoiceConn registers the voice connection of a guild so playback can be
+// routed to it. The Discord command layer calls this after the bot joined a
+// channel.
+func (s *MusicPlaybackService) SetVoiceConn(guildID string, conn ports.AudioConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.player(guildID).conn = conn
 }
 
+// Play resolves the query, adds it to the guild's queue and starts playback
+// if nothing is playing yet. The returned PlaybackResult describes whether a
+// new track started or was merely queued.
+func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query string) (*PlaybackResult, error) {
+	s.mu.Lock()
+	p := s.player(guildID)
+	conn := p.conn
+	playing := p.playing
+	s.mu.Unlock()
+
+	if conn == nil {
+		return nil, errors.New("bot is not connected to a voice channel")
+	}
+
+	track, err := s.trackResolver.Resolve(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.queue.AddToQueue(ctx, guildID, track); err != nil {
+		return nil, err
+	}
+
+	result := &PlaybackResult{Track: track, Started: !playing}
+
+	// Report the 1-based position of the track that was just added.
+	queue, err := s.queue.GetQueue(ctx, guildID)
+	if err != nil {
+		return nil, err
+	}
+	if queue != nil {
+		result.Position = len(queue.Tracks)
+	}
+
+	// Only kick off playback when the guild is idle.
+	if !playing {
+		if err := s.advance(ctx, guildID, 0); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+// Pause pauses the current playback. Not yet implemented.
 func (s *MusicPlaybackService) Pause(ctx context.Context, guildID string) error {
 	return nil
 }
 
+// Resume resumes paused playback. Not yet implemented.
 func (s *MusicPlaybackService) Resume(ctx context.Context, guildID string) error {
 	return nil
 }
 
+// Skip stops the current track and advances to the next one in the queue.
 func (s *MusicPlaybackService) Skip(ctx context.Context, guildID string) error {
-	return nil
+	s.mu.Lock()
+	p := s.player(guildID)
+	if !p.playing {
+		s.mu.Unlock()
+		return errors.New("nothing is playing")
+	}
+	// Bump the generation so any in-flight auto-advance goroutine for the
+	// current track considers itself stale and backs off.
+	p.gen++
+	if p.cancel != nil {
+		p.cancel()
+	}
+	if p.provider != nil {
+		p.provider.Close()
+	}
+	p.playing = false
+	s.mu.Unlock()
+
+	return s.advance(ctx, guildID, 0)
 }
 
+// Stop stops playback entirely. Not yet implemented.
 func (s *MusicPlaybackService) Stop(ctx context.Context, guildID string) error {
 	return nil
 }
 
+// Seek moves playback to the given position. Not yet implemented.
 func (s *MusicPlaybackService) Seek(ctx context.Context, guildID string, position int64) error {
 	return nil
 }
 
+// SetVolume adjusts the playback volume. Not yet implemented.
 func (s *MusicPlaybackService) SetVolume(ctx context.Context, guildID string, volume int) error {
 	return nil
 }
 
+// GetCurrentTrack returns the track currently playing for the guild, or nil
+// if nothing is playing.
 func (s *MusicPlaybackService) GetCurrentTrack(ctx context.Context, guildID string) (*Track, error) {
-	return nil, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p := s.player(guildID)
+	if !p.playing {
+		return nil, nil
+	}
+	return p.current, nil
 }
 
+// playNext is a convenience wrapper for advance triggered from outside the
+// playback loop.
+func (s *MusicPlaybackService) playNext(ctx context.Context, guildID string) error {
+	return s.advance(ctx, guildID, 0)
+}
+
+// advance moves the guild to the next track in the queue and starts streaming
+// it. expectedGen is the generation captured by an auto-advance goroutine; a
+// nonzero value makes advance a no-op if the generation has moved on, which
+// prevents double-advancing after a skip.
+func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expectedGen int) error {
+	s.mu.Lock()
+	p := s.player(guildID)
+	s.mu.Unlock()
+
+	// Serialize the advance decision per guild.
+	p.advanceMu.Lock()
+	defer p.advanceMu.Unlock()
+
+	// Drop stale auto-advances (e.g. a track was skipped while this advance
+	// was already queued).
+	if expectedGen != 0 {
+		s.mu.Lock()
+		stale := p.gen != expectedGen
+		s.mu.Unlock()
+		if stale {
+			return nil
+		}
+	}
+
+	queue, err := s.queue.GetQueue(ctx, guildID)
+	if err != nil {
+		return err
+	}
+	if queue == nil || len(queue.Tracks) == 0 {
+		s.stop(p)
+		return nil
+	}
+
+	// The next track is the front of the queue. It is streamed first and
+	// only removed from the queue once streaming succeeds, so a failed
+	// stream keeps the track listed instead of losing it.
+	track := queue.Tracks[0]
+	provider, err := s.streamer.Stream(ctx, track.URL)
+	if err != nil {
+		return err
+	}
+
+	queue.Tracks = queue.Tracks[1:]
+	if err := s.queue.saveQueue(ctx, queue); err != nil {
+		provider.Close()
+		return err
+	}
+
+	s.mu.Lock()
+	p.gen++
+	gen := p.gen
+	if p.provider != nil {
+		p.provider.Close()
+	}
+	if p.cancel != nil {
+		p.cancel()
+	}
+	advanceCtx, cancel := context.WithCancel(context.Background())
+	p.cancel = cancel
+	p.provider = provider
+	p.current = track
+	p.playing = true
+	conn := p.conn
+	s.mu.Unlock()
+
+	if conn == nil {
+		provider.Close()
+		return errors.New("bot is not connected to a voice channel")
+	}
+
+	// Hand the provider to the voice connection; disgo starts pulling frames.
+	conn.SetFrameProvider(provider)
+
+	// Wait for the track to finish (or for it to be skipped/stopped) and then
+	// advance to the next track. Uses a background context because it runs
+	// long after the originating command's context is gone.
+	go func() {
+		select {
+		case <-provider.Done():
+		case <-advanceCtx.Done():
+			return
+		}
+		if err := s.advance(context.Background(), guildID, gen); err != nil {
+			s.stop(p)
+		}
+	}()
+
+	return nil
+}
+
+// stop marks the guild as idle. Safe to call from any goroutine.
+func (s *MusicPlaybackService) stop(p *player) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p.playing = false
+	p.current = nil
+}
+
+// player returns the playback state for a guild, creating it on first use.
+// Callers must hold s.mu.
+func (s *MusicPlaybackService) player(guildID string) *player {
+	p, ok := s.players[guildID]
+	if !ok {
+		p = &player{}
+		s.players[guildID] = p
+	}
+	return p
+}
+
+// PlaybackResult describes the outcome of a Play call.
+type PlaybackResult struct {
+	Track *Track
+	// Position is the 1-based queue position of the added track.
+	Position int
+	// Started is true if playback began for this track, false if it was only
+	// queued behind an already-playing track.
+	Started bool
+}
+
+// Track is the application-level representation of a playable song.
 type Track struct {
 	ID           string
 	Title        string

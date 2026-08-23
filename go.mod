@@ -12,6 +12,7 @@ require (
 	github.com/lmittmann/tint v1.2.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/thomas-vilte/dave-go v0.5.1
+	layeh.com/gopus v0.0.0-20210501142526-1ee02d434e32
 )
 
 require (

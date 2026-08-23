@@ -52,18 +52,24 @@ func (c *ConnectCommand) Handle(ctx *discord.CommandContext) error {
 	channelID := ctx.GetString("channel")
 	parsedChannelId, _ := snowflake.Parse(channelID)
 
-	// Generate a Connection to connect against
+	// Generate a Connection to connect against. CreateConn returns the
+	// existing connection if the bot is already connected to this guild.
 	conn := ctx.Client.VoiceManager.CreateConn(parsedGuildId)
-	openCtx, cancel := context.WithTimeout(ctx.Ctx, time.Second*5)
 
-	defer cancel()
+	// Only open if the bot is not already in the target channel, otherwise
+	// re-opening a live connection would block until the timeout waiting for
+	// a new session description.
+	if ch := conn.ChannelID(); ch == nil || *ch != parsedChannelId {
+		openCtx, cancel := context.WithTimeout(ctx.Ctx, time.Second*5)
+		defer cancel()
 
-	//Connect to Voice Channel
-	err = conn.Open(openCtx, parsedChannelId, false, false)
+		//Connect to Voice Channel
+		err = conn.Open(openCtx, parsedChannelId, false, false)
 
-	if err != nil {
-		conn.Close(context.Background())
-		return ctx.EditResponse("Error while connecting to the voice channel")
+		if err != nil {
+			conn.Close(context.Background())
+			return ctx.EditResponse("Error while connecting to the voice channel")
+		}
 	}
 
 	return ctx.EditResponse("✅ Connected to voice channel")

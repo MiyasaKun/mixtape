@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine3.23
+    image: postgres:18-alpine3.23
     environment:
       POSTGRES_USER: ${DB_USER:-user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-pass}
@@ -8,7 +8,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
   valkey:
     image: valkey/valkey:alpine
