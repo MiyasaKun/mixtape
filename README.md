@@ -51,7 +51,7 @@ cd template && bun install
 
 4. Run with Docker:
 ```sh
-docker-compose up
+docker compose up --build
 ```
 
 Or manually:

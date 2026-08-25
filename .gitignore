@@ -8,8 +8,7 @@ app
 # Environment
 .env
 
-# Go
-go.sum
+.opencode
 
 # IDE
 .idea/
