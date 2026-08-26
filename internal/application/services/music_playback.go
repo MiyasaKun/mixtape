@@ -102,16 +102,6 @@ func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query s
 	return result, nil
 }
 
-// Pause pauses the current playback. Not yet implemented.
-func (s *MusicPlaybackService) Pause(ctx context.Context, guildID string) error {
-	return nil
-}
-
-// Resume resumes paused playback. Not yet implemented.
-func (s *MusicPlaybackService) Resume(ctx context.Context, guildID string) error {
-	return nil
-}
-
 // Skip stops the current track and advances to the next one in the queue.
 func (s *MusicPlaybackService) Skip(ctx context.Context, guildID string) error {
 	s.mu.Lock()
@@ -142,11 +132,6 @@ func (s *MusicPlaybackService) Stop(ctx context.Context, guildID string) error {
 
 // Seek moves playback to the given position. Not yet implemented.
 func (s *MusicPlaybackService) Seek(ctx context.Context, guildID string, position int64) error {
-	return nil
-}
-
-// SetVolume adjusts the playback volume. Not yet implemented.
-func (s *MusicPlaybackService) SetVolume(ctx context.Context, guildID string, volume int) error {
 	return nil
 }
 

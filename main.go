@@ -73,9 +73,7 @@ func main() {
 	discordBot.RegisterCommands(
 		commands.NewPlayCommand(musicPlayback),
 		commands.NewSkipCommand(musicPlayback),
-		commands.NewPauseCommand(musicPlayback),
 		commands.NewQueueCommand(musicPlayback, queueService),
-		commands.NewVolumeCommand(musicPlayback),
 		commands.NewNowPlayingCommand(musicPlayback),
 		commands.NewConnectCommand(guildConfigService),
 	)
