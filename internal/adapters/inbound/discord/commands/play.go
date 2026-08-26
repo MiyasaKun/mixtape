@@ -84,7 +84,7 @@ func (c *PlayCommand) Handle(ctx *discord.CommandContext) error {
 		defer cancel()
 
 		// Use Connection to connect to Channel using DAVE
-		err = conn.Open(openCtx, *voiceState.ChannelID, false, true)
+		err = conn.Open(openCtx, *voiceState.ChannelID, false, false)
 
 		if err != nil {
 			conn.Close(context.Background())

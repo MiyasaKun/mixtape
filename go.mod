@@ -1,6 +1,6 @@
 module fiber_test
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/disgoorg/disgo v0.19.6
@@ -11,8 +11,8 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/lmittmann/tint v1.2.0
 	github.com/redis/go-redis/v9 v9.22.0
+	github.com/thesyncim/gopus v0.1.1
 	github.com/thomas-vilte/dave-go v0.5.1
-	layeh.com/gopus v0.0.0-20210501142526-1ee02d434e32
 )
 
 require (

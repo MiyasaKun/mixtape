@@ -18,15 +18,15 @@ import (
 
 	"fiber_test/internal/application/ports"
 
-	"layeh.com/gopus"
+	"github.com/thesyncim/gopus"
 )
 
 const (
 	sampleRate    = 48000 // Opus frames are always 48kHz
 	channels      = 2     // stereo
 	frameSize     = 960   // samples per channel per 20ms frame
-	pcmFrameBytes = 3840  // 20ms of s16le stereo PCM at 48kHz
-	pcmFrameWords = 1920  // 20ms of int16 stereo PCM at 48kHz
+	pcmFrameWords = frameSize * channels
+	pcmFrameBytes = pcmFrameWords * 2 // 20ms of s16le stereo PCM at 48kHz
 
 	// maxYTDLPAttempts is how many times a yt-dlp invocation is retried.
 	// YouTube intermittently answers with an empty response / exit 0 when it
@@ -196,7 +196,11 @@ func newStreamProvider(ctx context.Context, streamURL string) (ports.FrameProvid
 		return nil, err
 	}
 
-	enc, err := gopus.NewEncoder(sampleRate, channels, gopus.Audio)
+	enc, err := gopus.NewEncoder(gopus.EncoderConfig{
+		SampleRate:  sampleRate,
+		Channels:    channels,
+		Application: gopus.ApplicationAudio,
+	})
 	if err != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -236,7 +240,12 @@ func (p *streamProvider) ProvideFrame() ([]byte, error) {
 		p.pcm[i] = int16(binary.LittleEndian.Uint16(p.pcmBytes[i*2:]))
 	}
 
-	return p.enc.Encode(p.pcm[:], frameSize, 4000)
+	data := make([]byte, 4000)
+	n, err := p.enc.EncodeInt16(p.pcm[:], data)
+	if err != nil {
+		return nil, err
+	}
+	return data[:n], nil
 }
 
 // Done reports when the stream has finished or been closed.

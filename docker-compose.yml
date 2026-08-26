@@ -1,6 +1,32 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mixtape:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      PORT: ":3000"
+      ENV: ${ENV:-production}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_APP_ID: ${DISCORD_APP_ID:-}
+      GUILD_ID: ${GUILD_ID:-}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-http://localhost:3000/api/auth/spotify/callback}
+      DATABASE_URL: postgres://${DB_USER:-user}:${DB_PASSWORD:-pass}@postgres:5432/${DB_NAME:-discord_bot}?sslmode=disable
+      REDIS_URL: redis://valkey:6379
+    ports:
+      - "3000:3000"
+
   postgres:
     image: postgres:18-alpine3.23
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-pass}
@@ -9,13 +35,26 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   valkey:
     image: valkey/valkey:alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
 volumes:
   postgres_data:
