@@ -1,7 +1,4 @@
 include:
-  - template: Jobs/Dependency-Scanning.v2.gitlab-ci.yml
-    inputs:
-      stage: security
   - template: Jobs/Secret-Detection.gitlab-ci.yml
 
 stages:
