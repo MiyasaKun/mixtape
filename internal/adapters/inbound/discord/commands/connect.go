@@ -11,12 +11,14 @@ import (
 )
 
 type ConnectCommand struct {
-	guildConfig *services.GuildConfigService
+	guildConfig   *services.GuildConfigService
+	musicPlayback *services.MusicPlaybackService
 }
 
-func NewConnectCommand(guildConfig *services.GuildConfigService) *ConnectCommand {
+func NewConnectCommand(guildConfig *services.GuildConfigService, musicPlayback *services.MusicPlaybackService) *ConnectCommand {
 	return &ConnectCommand{
-		guildConfig: guildConfig,
+		guildConfig:   guildConfig,
+		musicPlayback: musicPlayback,
 	}
 }
 
@@ -71,6 +73,7 @@ func (c *ConnectCommand) Handle(ctx *discord.CommandContext) error {
 			return ctx.EditResponse("Error while connecting to the voice channel")
 		}
 	}
+	c.musicPlayback.SetVoiceConn(guildID, discord.NewVoiceConnAdapter(conn))
 
 	return ctx.EditResponse("✅ Connected to voice channel")
 }

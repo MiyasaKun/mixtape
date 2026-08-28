@@ -75,7 +75,7 @@ func main() {
 		commands.NewSkipCommand(musicPlayback),
 		commands.NewQueueCommand(musicPlayback, queueService),
 		commands.NewNowPlayingCommand(musicPlayback),
-		commands.NewConnectCommand(guildConfigService),
+		commands.NewConnectCommand(guildConfigService, musicPlayback),
 	)
 
 	if err := discordBot.Start(); err != nil {

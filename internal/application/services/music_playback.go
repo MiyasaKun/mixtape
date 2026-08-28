@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"fiber_test/internal/adapters/outbound/youtube"
 	"fiber_test/internal/application/ports"
@@ -17,6 +18,7 @@ type MusicPlaybackService struct {
 	queue         *QueueService
 	trackResolver *TrackResolverService
 	streamer      *youtube.YouTube
+	idleTimeout   time.Duration
 
 	mu      sync.Mutex
 	players map[string]*player
@@ -38,7 +40,13 @@ type player struct {
 	// waiting goroutine captures the generation of its own track and bails
 	// out if the generation has moved on (stale auto-advance).
 	gen int
+	// idleTimer disconnects a connected guild that has no active playback.
+	idleTimer *time.Timer
+	// idleToken invalidates callbacks from timers that have been reset.
+	idleToken uint64
 }
+
+const defaultIdleTimeout = 3 * time.Minute
 
 // NewMusicPlaybackService builds the playback service from its dependencies.
 func NewMusicPlaybackService(queue *QueueService, trackResolver *TrackResolverService, streamer *youtube.YouTube) *MusicPlaybackService {
@@ -46,6 +54,7 @@ func NewMusicPlaybackService(queue *QueueService, trackResolver *TrackResolverSe
 		queue:         queue,
 		trackResolver: trackResolver,
 		streamer:      streamer,
+		idleTimeout:   defaultIdleTimeout,
 		players:       make(map[string]*player),
 	}
 }
@@ -56,7 +65,37 @@ func NewMusicPlaybackService(queue *QueueService, trackResolver *TrackResolverSe
 func (s *MusicPlaybackService) SetVoiceConn(guildID string, conn ports.AudioConn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.player(guildID).conn = conn
+	p := s.player(guildID)
+	p.conn = conn
+	s.resetIdleTimerLocked(guildID, p)
+}
+
+// Touch resets the inactivity timer for a connected guild.
+func (s *MusicPlaybackService) Touch(guildID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetIdleTimerLocked(guildID, s.player(guildID))
+}
+
+// Disconnect stops playback and closes the guild's voice connection. It is
+// safe to call from command handlers, event handlers, and timer callbacks.
+func (s *MusicPlaybackService) Disconnect(ctx context.Context, guildID string) {
+	s.mu.Lock()
+	p := s.player(guildID)
+	s.mu.Unlock()
+
+	p.advanceMu.Lock()
+	s.mu.Lock()
+	provider, conn := s.clearPlayerLocked(p)
+	s.mu.Unlock()
+	p.advanceMu.Unlock()
+
+	if provider != nil {
+		provider.Close()
+	}
+	if conn != nil {
+		conn.Close(ctx)
+	}
 }
 
 // Play resolves the query, adds it to the guild's queue and starts playback
@@ -67,6 +106,7 @@ func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query s
 	p := s.player(guildID)
 	conn := p.conn
 	playing := p.playing
+	s.resetIdleTimerLocked(guildID, p)
 	s.mu.Unlock()
 
 	if conn == nil {
@@ -96,6 +136,7 @@ func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query s
 	// Only kick off playback when the guild is idle.
 	if !playing {
 		if err := s.advance(ctx, guildID, 0); err != nil {
+			s.stop(guildID, p)
 			return nil, err
 		}
 	}
@@ -122,7 +163,11 @@ func (s *MusicPlaybackService) Skip(ctx context.Context, guildID string) error {
 	p.playing = false
 	s.mu.Unlock()
 
-	return s.advance(ctx, guildID, 0)
+	err := s.advance(ctx, guildID, 0)
+	if err != nil {
+		s.stop(guildID, p)
+	}
+	return err
 }
 
 // Stop stops playback entirely. Not yet implemented.
@@ -183,7 +228,7 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 		return err
 	}
 	if queue == nil || len(queue.Tracks) == 0 {
-		s.stop(p)
+		s.stop(guildID, p)
 		return nil
 	}
 
@@ -237,19 +282,90 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 			return
 		}
 		if err := s.advance(context.Background(), guildID, gen); err != nil {
-			s.stop(p)
+			s.stop(guildID, p)
 		}
 	}()
 
 	return nil
 }
 
-// stop marks the guild as idle. Safe to call from any goroutine.
-func (s *MusicPlaybackService) stop(p *player) {
+// stop marks the guild as idle and starts the disconnect timer. Safe to call
+// from any goroutine.
+func (s *MusicPlaybackService) stop(guildID string, p *player) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	p.playing = false
 	p.current = nil
+	provider := p.provider
+	p.provider = nil
+	if p.cancel != nil {
+		p.cancel()
+		p.cancel = nil
+	}
+	s.resetIdleTimerLocked(guildID, p)
+	s.mu.Unlock()
+
+	if provider != nil {
+		provider.Close()
+	}
+}
+
+func (s *MusicPlaybackService) resetIdleTimerLocked(guildID string, p *player) {
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+		p.idleTimer = nil
+	}
+	p.idleToken++
+
+	if p.conn == nil || p.playing {
+		return
+	}
+
+	token := p.idleToken
+	p.idleTimer = time.AfterFunc(s.idleTimeout, func() {
+		s.disconnectIfIdle(guildID, p, token)
+	})
+}
+
+func (s *MusicPlaybackService) disconnectIfIdle(guildID string, p *player, token uint64) {
+	p.advanceMu.Lock()
+	s.mu.Lock()
+	if p.idleToken != token || p.idleTimer == nil || p.playing || p.conn == nil {
+		s.mu.Unlock()
+		p.advanceMu.Unlock()
+		return
+	}
+
+	provider, conn := s.clearPlayerLocked(p)
+	s.mu.Unlock()
+	p.advanceMu.Unlock()
+
+	if provider != nil {
+		provider.Close()
+	}
+	if conn != nil {
+		conn.Close(context.Background())
+	}
+}
+
+func (s *MusicPlaybackService) clearPlayerLocked(p *player) (ports.FrameProvider, ports.AudioConn) {
+	p.gen++
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+		p.idleTimer = nil
+	}
+	p.idleToken++
+	if p.cancel != nil {
+		p.cancel()
+		p.cancel = nil
+	}
+
+	provider := p.provider
+	conn := p.conn
+	p.provider = nil
+	p.conn = nil
+	p.current = nil
+	p.playing = false
+	return provider, conn
 }
 
 // player returns the playback state for a guild, creating it on first use.
