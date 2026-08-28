@@ -158,6 +158,9 @@ func optionToDiscord(opt CommandOption) discord.ApplicationCommandOption {
 			Name:        opt.Name,
 			Description: opt.Description,
 			Required:    opt.Required,
+			ChannelTypes: []discord.ChannelType{
+				discord.ChannelTypeGuildVoice, discord.ChannelTypeGuildStageVoice,
+			},
 		}
 	case discord.ApplicationCommandOptionTypeUser:
 		return discord.ApplicationCommandOptionUser{

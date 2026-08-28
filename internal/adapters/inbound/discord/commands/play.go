@@ -96,7 +96,7 @@ func (c *PlayCommand) Handle(ctx *discord.CommandContext) error {
 	c.musicPlayback.SetVoiceConn(guildID, discord.NewVoiceConnAdapter(conn))
 	result, err := c.musicPlayback.Play(ctx.Ctx, guildID, url)
 	if err != nil {
-		conn.Close(context.Background())
+		c.musicPlayback.Disconnect(context.Background(), guildID)
 		return ctx.EditResponse("❌ Failed to play: " + err.Error())
 	}
 

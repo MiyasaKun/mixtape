@@ -13,6 +13,7 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/snowflake/v2"
 	"github.com/thomas-vilte/dave-go/session"
 )
 
@@ -61,7 +62,12 @@ func NewBot(
 		spotifyIntegration: spotifyIntegration,
 	}
 
-	client.AddEventListeners(bot.NewListenerFunc(b.handleInteraction))
+	client.AddEventListeners(
+		bot.NewListenerFunc(b.handleInteraction),
+		bot.NewListenerFunc(b.handleGuildVoiceJoin),
+		bot.NewListenerFunc(b.handleGuildVoiceMove),
+		bot.NewListenerFunc(b.handleGuildVoiceLeave),
+	)
 
 	return b
 }
@@ -129,4 +135,60 @@ func (b *Bot) handleInteraction(e *events.ApplicationCommandInteractionCreate) {
 			b.logger.Error("failed to send error response", "error", respondErr)
 		}
 	}
+}
+
+func (b *Bot) handleGuildVoiceJoin(e *events.GuildVoiceJoin) {
+	if e.VoiceState.UserID == b.client.ID() {
+		return
+	}
+	b.touchIfInBotChannel(e.VoiceState.GuildID, e.VoiceState.ChannelID)
+}
+
+func (b *Bot) handleGuildVoiceMove(e *events.GuildVoiceMove) {
+	if e.VoiceState.UserID == b.client.ID() {
+		return
+	}
+	b.touchIfInBotChannel(e.VoiceState.GuildID, e.VoiceState.ChannelID)
+	b.disconnectIfAlone(e.VoiceState.GuildID)
+}
+
+func (b *Bot) handleGuildVoiceLeave(e *events.GuildVoiceLeave) {
+	if e.VoiceState.UserID == b.client.ID() {
+		return
+	}
+	b.disconnectIfAlone(e.VoiceState.GuildID)
+}
+
+func (b *Bot) disconnectIfAlone(guildID snowflake.ID) {
+	conn := b.client.VoiceManager.GetConn(guildID)
+	if conn == nil || conn.ChannelID() == nil {
+		return
+	}
+
+	channel, ok := b.client.Caches.GuildAudioChannel(*conn.ChannelID())
+	if !ok {
+		return
+	}
+
+	self, ok := b.client.Caches.SelfUser()
+	if !ok {
+		return
+	}
+
+	for _, member := range b.client.Caches.AudioChannelMembers(channel) {
+		if member.User.ID != self.ID {
+			return
+		}
+	}
+
+	b.musicPlayback.Disconnect(context.Background(), guildID.String())
+}
+
+func (b *Bot) touchIfInBotChannel(guildID snowflake.ID, channelID *snowflake.ID) {
+	conn := b.client.VoiceManager.GetConn(guildID)
+	if conn == nil || conn.ChannelID() == nil || channelID == nil || *conn.ChannelID() != *channelID {
+		return
+	}
+
+	b.musicPlayback.Touch(guildID.String())
 }

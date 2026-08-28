@@ -1,6 +1,8 @@
 package discord
 
 import (
+	"context"
+
 	"fiber_test/internal/application/ports"
 
 	"github.com/disgoorg/disgo/voice"
@@ -21,6 +23,10 @@ func NewVoiceConnAdapter(conn voice.Conn) ports.AudioConn {
 
 func (a *voiceConnAdapter) SetFrameProvider(provider ports.FrameProvider) {
 	a.conn.SetOpusFrameProvider(&opusFrameProvider{provider: provider})
+}
+
+func (a *voiceConnAdapter) Close(ctx context.Context) {
+	a.conn.Close(ctx)
 }
 
 // opusFrameProvider adapts a ports.FrameProvider to the OpusFrameProvider
