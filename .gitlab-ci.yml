@@ -6,6 +6,10 @@ stages:
   - test
   - security
   - image
+  - terraform-validate
+  - terraform-server
+  - terraform-plan
+  - deploy
 
 workflow:
   rules:
@@ -95,3 +99,130 @@ docker-image:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_COMMIT_TAG'
+
+.terraform-backend:
+  image: hashicorp/terraform:1.16.0
+  variables:
+    TF_HTTP_USERNAME: gitlab-ci-token
+    TF_HTTP_PASSWORD: $CI_JOB_TOKEN
+    TF_HTTP_LOCK_METHOD: POST
+    TF_HTTP_UNLOCK_METHOD: DELETE
+    TF_HTTP_RETRY_WAIT_MIN: "5"
+
+.terraform-deploy:
+  extends: .terraform-backend
+  before_script:
+    - apk add --no-cache openssh-client
+    - install -d -m 700 "$CI_PROJECT_DIR/.ssh"
+    - cp "$DEPLOY_SSH_PRIVATE_KEY" "$CI_PROJECT_DIR/.ssh/deploy_key"
+    - cp "$DEPLOY_SSH_CERTIFICATE" "$CI_PROJECT_DIR/.ssh/deploy_key-cert.pub"
+    - cp "$DEPLOY_KNOWN_HOSTS" "$CI_PROJECT_DIR/.ssh/known_hosts"
+    - chmod 600 "$CI_PROJECT_DIR/.ssh/deploy_key" "$CI_PROJECT_DIR/.ssh/deploy_key-cert.pub" "$CI_PROJECT_DIR/.ssh/known_hosts"
+    - export TF_HTTP_ADDRESS="$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server"
+    - export TF_HTTP_LOCK_ADDRESS="$TF_HTTP_ADDRESS/lock"
+    - export TF_HTTP_UNLOCK_ADDRESS="$TF_HTTP_ADDRESS/lock"
+    - terraform -chdir=infra/server init -reconfigure
+    - export TF_VAR_deploy_host="$(terraform -chdir=infra/server output -raw ipv4_address)"
+    - export TF_VAR_ssh_identity_file="$CI_PROJECT_DIR/.ssh/deploy_key"
+    - export TF_VAR_ssh_certificate_file="$CI_PROJECT_DIR/.ssh/deploy_key-cert.pub"
+    - export TF_VAR_ssh_known_hosts_file="$CI_PROJECT_DIR/.ssh/known_hosts"
+    - export TF_VAR_registry_address="$CI_REGISTRY"
+    - export TF_VAR_registry_username="$REGISTRY_DEPLOY_USER"
+    - export TF_VAR_registry_password="$REGISTRY_DEPLOY_PASSWORD"
+    - export TF_VAR_image="$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    - export TF_HTTP_ADDRESS="$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production"
+    - export TF_HTTP_LOCK_ADDRESS="$TF_HTTP_ADDRESS/lock"
+    - export TF_HTTP_UNLOCK_ADDRESS="$TF_HTTP_ADDRESS/lock"
+    - terraform -chdir=infra/docker init -reconfigure
+    - |
+      attempts=0
+      until ssh -p "${TF_VAR_deploy_port:-22}" -i "$TF_VAR_ssh_identity_file" -o "CertificateFile=$TF_VAR_ssh_certificate_file" -o IdentitiesOnly=yes -o "UserKnownHostsFile=$TF_VAR_ssh_known_hosts_file" -o StrictHostKeyChecking=yes -o BatchMode=yes "${TF_VAR_deploy_user:-mixtape-deploy}@${TF_VAR_deploy_host}" docker info >/dev/null; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 30 ]; then
+          exit 1
+        fi
+        sleep 10
+      done
+
+terraform-validate:
+  extends: .terraform-backend
+  stage: terraform-validate
+  script:
+    - terraform fmt -check -recursive infra
+    - terraform -chdir=infra/docker init -backend=false
+    - terraform -chdir=infra/docker validate
+    - terraform -chdir=infra/server init -backend=false
+    - terraform -chdir=infra/server validate
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+terraform-server-plan:
+  extends: .terraform-backend
+  stage: terraform-server
+  variables:
+    TF_HTTP_ADDRESS: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server"
+    TF_HTTP_LOCK_ADDRESS: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server/lock"
+    TF_HTTP_UNLOCK_ADDRESS: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server/lock"
+  script:
+    - terraform -chdir=infra/server init -reconfigure
+    - terraform -chdir=infra/server plan -out=server.tfplan
+  artifacts:
+    access: developer
+    expire_in: 1 day
+    paths:
+      - infra/server/server.tfplan
+  resource_group: production-server
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+terraform-server-apply:
+  extends: .terraform-backend
+  stage: terraform-server
+  variables:
+    TF_HTTP_ADDRESS: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server"
+    TF_HTTP_LOCK_ADDRESS: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server/lock"
+    TF_HTTP_UNLOCK_ADDRESS: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/terraform/state/production-server/lock"
+  script:
+    - terraform -chdir=infra/server init -reconfigure
+    - terraform -chdir=infra/server apply -input=false server.tfplan
+  needs:
+    - job: terraform-server-plan
+      artifacts: true
+  resource_group: production-server
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+
+terraform-deploy-plan:
+  extends: .terraform-deploy
+  stage: terraform-plan
+  script:
+    - terraform -chdir=infra/docker plan -out=tfplan
+  artifacts:
+    access: developer
+    expire_in: 1 day
+    paths:
+      - infra/docker/tfplan
+  resource_group: production
+  needs:
+    - job: docker-image
+      artifacts: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+terraform-deploy-apply:
+  extends: .terraform-deploy
+  stage: deploy
+  script:
+    - terraform -chdir=infra/docker apply -input=false tfplan
+  resource_group: production
+  environment:
+    name: production
+  needs:
+    - job: terraform-deploy-plan
+      artifacts: true
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual

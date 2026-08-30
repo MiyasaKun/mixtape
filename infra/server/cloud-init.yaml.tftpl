@@ -1,0 +1,66 @@
+#cloud-config
+
+write_files:
+  - path: /etc/ssh/mixtape-deploy-ca.pub
+    owner: root:root
+    permissions: '0644'
+    content: |
+      ${deploy_ca_public}
+
+  - path: /etc/ssh/sshd_config.d/mixtape-cert.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      TrustedUserCAKeys /etc/ssh/mixtape-deploy-ca.pub
+      AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u
+      AuthenticationMethods publickey
+      PubkeyAuthentication yes
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      AllowAgentForwarding no
+      X11Forwarding no
+      PermitTunnel no
+
+  - path: /usr/local/sbin/mixtape-bootstrap
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y ca-certificates curl gnupg
+
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg \
+        | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+
+      . /etc/os-release
+      printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian %s stable\n' \
+        "$(dpkg --print-architecture)" "$VERSION_CODENAME" \
+        > /etc/apt/sources.list.d/docker.list
+
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      systemctl enable --now docker
+
+      if ! id -u '${deploy_user}' >/dev/null 2>&1; then
+        useradd --create-home --shell /bin/bash '${deploy_user}'
+      fi
+      usermod --append --groups docker '${deploy_user}'
+
+      install -d -m 0755 -o root -g root /etc/ssh/auth_principals
+      printf '%s\n' '${deploy_principal}' > /etc/ssh/auth_principals/${deploy_user}
+      chmod 0644 /etc/ssh/auth_principals/${deploy_user}
+
+      sshd -t
+      systemctl restart ssh
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+runcmd:
+  - [bash, /usr/local/sbin/mixtape-bootstrap]
