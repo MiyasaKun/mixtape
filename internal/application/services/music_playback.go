@@ -6,18 +6,31 @@ import (
 	"sync"
 	"time"
 
-	"fiber_test/internal/adapters/outbound/youtube"
 	"fiber_test/internal/application/ports"
 )
+
+// PlaybackQueue is the queue boundary used by playback. Keeping this
+// interface at the application boundary lets playback work with the real
+// Redis-backed queue or an in-memory test double.
+type PlaybackQueue interface {
+	GetQueue(ctx context.Context, guildID string) (*Queue, error)
+	AddToQueue(ctx context.Context, guildID string, track *Track) error
+	SaveQueue(ctx context.Context, queue *Queue) error
+}
+
+// TrackResolver resolves user input into an application track.
+type TrackResolver interface {
+	Resolve(ctx context.Context, query string) (*Track, error)
+}
 
 // MusicPlaybackService orchestrates audio playback for every guild the bot
 // serves. It resolves requested tracks, keeps them in the queue, streams
 // them to the guild's voice connection and automatically advances to the
 // next track when the current one finishes.
 type MusicPlaybackService struct {
-	queue         *QueueService
-	trackResolver *TrackResolverService
-	streamer      *youtube.YouTube
+	queue         PlaybackQueue
+	trackResolver TrackResolver
+	streamer      ports.AudioStreamer
 	idleTimeout   time.Duration
 
 	mu      sync.Mutex
@@ -49,7 +62,7 @@ type player struct {
 const defaultIdleTimeout = 3 * time.Minute
 
 // NewMusicPlaybackService builds the playback service from its dependencies.
-func NewMusicPlaybackService(queue *QueueService, trackResolver *TrackResolverService, streamer *youtube.YouTube) *MusicPlaybackService {
+func NewMusicPlaybackService(queue PlaybackQueue, trackResolver TrackResolver, streamer ports.AudioStreamer) *MusicPlaybackService {
 	return &MusicPlaybackService{
 		queue:         queue,
 		trackResolver: trackResolver,
@@ -242,7 +255,7 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 	}
 
 	queue.Tracks = queue.Tracks[1:]
-	if err := s.queue.saveQueue(ctx, queue); err != nil {
+	if err := s.queue.SaveQueue(ctx, queue); err != nil {
 		provider.Close()
 		return err
 	}
@@ -261,6 +274,9 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 	p.provider = provider
 	p.current = track
 	p.playing = true
+	// The idle timer may have been armed while the track was resolving. Stop
+	// it as soon as playback is active so it can never race with a song.
+	s.resetIdleTimerLocked(guildID, p)
 	conn := p.conn
 	s.mu.Unlock()
 

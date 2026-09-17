@@ -5,7 +5,7 @@ ARG GO_VERSION=1.27.0
 ARG GO_ALPINE_VERSION=3.24
 ARG ALPINE_VERSION=3.24.0
 
-FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION}-alpine AS frontend-deps
+FROM oven/bun:${BUN_VERSION}-alpine AS frontend-deps
 WORKDIR /src/template
 
 COPY template/package.json template/bun.lock ./
@@ -15,7 +15,7 @@ FROM frontend-deps AS frontend-builder
 COPY template ./
 RUN bun run build
 
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${GO_ALPINE_VERSION} AS backend-deps
+FROM golang:${GO_VERSION}-alpine${GO_ALPINE_VERSION} AS backend-deps
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -27,7 +27,7 @@ ARG TARGETARCH
 
 COPY . .
 COPY --from=frontend-builder /src/template/build ./template/build
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -trimpath -ldflags="-s -w" -o /out/mixtape .
 
 FROM backend-builder AS backend-test

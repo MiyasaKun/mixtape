@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -165,9 +166,12 @@ func firstNonEmptyLine(b []byte) string {
 // transcodes the source audio to raw s16le PCM at 48kHz stereo on stdout;
 // each 20ms chunk is encoded to an Opus frame in-process with gopus.
 type streamProvider struct {
-	cmd    *exec.Cmd
-	stdout io.ReadCloser
-	enc    *gopus.Encoder
+	cmd           *exec.Cmd
+	stdout        io.ReadCloser
+	enc           *gopus.Encoder
+	processCancel context.CancelFunc
+	stderr        *bytes.Buffer
+	processErr    error
 
 	done     chan struct{}
 	doneOnce sync.Once
@@ -180,19 +184,31 @@ type streamProvider struct {
 // newStreamProvider starts ffmpeg decoding the given stream URL and returns
 // a provider feeding its PCM output.
 func newStreamProvider(ctx context.Context, streamURL string) (ports.FrameProvider, error) {
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// The command that requested playback may finish before the track does.
+	// The provider owns the ffmpeg process after it has been created, so only
+	// Close (skip, disconnect, or end of stream) can stop it.
+	processCtx, processCancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(processCtx, "ffmpeg",
 		"-nostdin", "-hide_banner", "-loglevel", "error",
+		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
 		"-i", streamURL,
 		"-f", "s16le", "-ar", "48000", "-ac", "2",
 		"pipe:1",
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		processCancel()
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
+	stderr := &bytes.Buffer{}
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
+		processCancel()
 		return nil, err
 	}
 
@@ -202,16 +218,19 @@ func newStreamProvider(ctx context.Context, streamURL string) (ports.FrameProvid
 		Application: gopus.ApplicationAudio,
 	})
 	if err != nil {
+		processCancel()
 		cmd.Process.Kill()
 		cmd.Wait()
 		return nil, err
 	}
 
 	return &streamProvider{
-		cmd:    cmd,
-		stdout: stdout,
-		enc:    enc,
-		done:   make(chan struct{}),
+		cmd:           cmd,
+		stdout:        stdout,
+		enc:           enc,
+		processCancel: processCancel,
+		stderr:        stderr,
+		done:          make(chan struct{}),
 	}, nil
 }
 
@@ -228,8 +247,11 @@ func (p *streamProvider) ProvideFrame() ([]byte, error) {
 	// ReadFull ensures we only encode a complete 20ms frame; anything short
 	// means the stream ended mid-frame.
 	if _, err := io.ReadFull(p.stdout, p.pcmBytes[:]); err != nil {
+		p.finish()
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			p.finish()
+			if streamErr := p.streamError(); streamErr != nil {
+				return nil, streamErr
+			}
 			return nil, io.EOF
 		}
 		return nil, err
@@ -243,6 +265,7 @@ func (p *streamProvider) ProvideFrame() ([]byte, error) {
 	data := make([]byte, 4000)
 	n, err := p.enc.EncodeInt16(p.pcm[:], data)
 	if err != nil {
+		p.finish()
 		return nil, err
 	}
 	return data[:n], nil
@@ -263,9 +286,22 @@ func (p *streamProvider) Close() {
 func (p *streamProvider) finish() {
 	p.doneOnce.Do(func() {
 		close(p.done)
+		p.processCancel()
 		if p.cmd != nil && p.cmd.Process != nil {
 			p.cmd.Process.Kill()
-			p.cmd.Wait()
 		}
+		p.processErr = p.cmd.Wait()
 	})
+}
+
+// streamError preserves ffmpeg's failure instead of making an interrupted
+// source look like a normally completed track.
+func (p *streamProvider) streamError() error {
+	if p.processErr == nil {
+		return nil
+	}
+	if detail := strings.TrimSpace(p.stderr.String()); detail != "" {
+		return fmt.Errorf("ffmpeg stream failed: %s", detail)
+	}
+	return fmt.Errorf("ffmpeg stream failed: %w", p.processErr)
 }

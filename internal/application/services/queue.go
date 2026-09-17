@@ -67,6 +67,16 @@ func (s *QueueService) AddToQueue(ctx context.Context, guildID string, track *Tr
 	return s.saveQueue(ctx, queue)
 }
 
+// SaveQueue persists a queue for the playback service after it advances to a
+// new track. Callers that modify a queue should prefer the higher-level queue
+// methods when possible.
+func (s *QueueService) SaveQueue(ctx context.Context, queue *Queue) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.saveQueue(ctx, queue)
+}
+
 // RemoveFromQueue removes the track at the given index.
 func (s *QueueService) RemoveFromQueue(ctx context.Context, guildID string, index int) error {
 	s.mu.Lock()
