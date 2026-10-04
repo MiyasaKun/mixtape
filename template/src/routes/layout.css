@@ -1,8 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap');
 @import "tailwindcss";
 @plugin "daisyui";
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap');
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--color-neu-bg: #e0e5ec;
+	--color-neu-light: #ffffff;
+	--color-neu-dark: #a3b1c6;
+	--color-neu-accent: #6d5ef0;
+	--color-neu-text: #3a4157;
+
+	--color-neu-bg-dark: #1e2230;
+	--color-neu-light-dark: #2e3650;
+	--color-neu-dark-dark: #12151f;
+	--color-neu-accent-dark: #8b7cff;
+	--color-neu-text-dark: #e4e9f2;
+}
+
+:root {
+	--neu-bg: #e0e5ec;
+	--neu-light: #ffffff;
+	--neu-dark: #a3b1c6;
+	--neu-accent: #6d5ef0;
+	--neu-text: #3a4157;
+}
+
+.dark {
+	--neu-bg: #1e2230;
+	--neu-light: #2e3650;
+	--neu-dark: #12151f;
+	--neu-accent: #8b7cff;
+	--neu-text: #e4e9f2;
+}
 
 * {
 	font-family: 'Archivo Black', sans-serif;
+}
+
+body {
+	background-color: var(--neu-bg);
+	color: var(--neu-text);
+}
+
+@utility neu {
+	background: var(--neu-bg);
+	color: var(--neu-text);
+	border-radius: 1rem;
+	box-shadow:
+		8px 8px 16px var(--neu-dark),
+		-8px -8px 16px var(--neu-light);
+}
+
+@utility neu-inset {
+	background: var(--neu-bg);
+	color: var(--neu-text);
+	border-radius: 1rem;
+	box-shadow:
+		inset 8px 8px 16px var(--neu-dark),
+		inset -8px -8px 16px var(--neu-light);
+}
+
+@utility neu-sm {
+	background: var(--neu-bg);
+	color: var(--neu-text);
+	border-radius: 0.75rem;
+	box-shadow:
+		4px 4px 8px var(--neu-dark),
+		-4px -4px 8px var(--neu-light);
+}
+
+@utility neu-lg {
+	background: var(--neu-bg);
+	color: var(--neu-text);
+	border-radius: 1.5rem;
+	box-shadow:
+		12px 12px 24px var(--neu-dark),
+		-12px -12px 24px var(--neu-light);
 }
 

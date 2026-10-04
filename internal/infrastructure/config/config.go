@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"time"
 
 	"github.com/gofiber/fiber/v3/log"
 	"github.com/joho/godotenv"
@@ -16,6 +17,11 @@ type Config struct {
 	SpotifyClientID     string
 	SpotifyClientSecret string
 	SpotifyRedirectURI  string
+	GoogleClientID      string
+	GoogleClientSecret  string
+	GoogleRedirectURI   string
+	AuthEncryptionKey   string
+	SessionTTL          time.Duration
 	DatabaseURL         string
 	RedisURL            string
 }
@@ -35,6 +41,11 @@ func Load() *Config {
 		SpotifyClientID:     getEnv("SPOTIFY_CLIENT_ID", ""),
 		SpotifyClientSecret: getEnv("SPOTIFY_CLIENT_SECRET", ""),
 		SpotifyRedirectURI:  getEnv("SPOTIFY_REDIRECT_URI", "http://localhost:3000/api/auth/spotify/callback"),
+		GoogleClientID:      getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:  getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURI:   getEnv("GOOGLE_REDIRECT_URI", "http://localhost:3000/api/auth/google/callback"),
+		AuthEncryptionKey:   getEnv("AUTH_ENCRYPTION_KEY", ""),
+		SessionTTL:          getEnvDuration("SESSION_TTL", 30*24*time.Hour),
 		DatabaseURL:         getEnv("DATABASE_URL", "postgres://user:pass@localhost:5432/discord_bot"),
 		RedisURL:            getEnv("REDIS_URL", "redis://localhost:6379"),
 	}
@@ -45,4 +56,17 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		log.Warn("invalid duration, using default", "key", key, "value", value)
+		return defaultValue
+	}
+	return parsed
 }

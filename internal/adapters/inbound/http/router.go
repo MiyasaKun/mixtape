@@ -1,6 +1,8 @@
 package http
 
 import (
+	"fiber_test/internal/adapters/inbound/http/handlers"
+	"fiber_test/internal/adapters/inbound/http/middleware"
 	"fiber_test/internal/application/services"
 	"fiber_test/internal/infrastructure/config"
 	"fiber_test/internal/infrastructure/logging"
@@ -26,6 +28,7 @@ func NewRouter(
 	queue *services.QueueService,
 	guildConfig *services.GuildConfigService,
 	spotifyIntegration *services.SpotifyIntegrationService,
+	authService *services.AuthService,
 	staticFS fs.FS,
 ) *Router {
 	r := &Router{
@@ -56,6 +59,29 @@ func NewRouter(
 	api.Get("/health", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
+
+	auth := handlers.NewAuthHandler(
+		authService,
+		spotifyIntegration,
+		cfg.GoogleRedirectURI,
+		cfg.SpotifyRedirectURI,
+		cfg.Env == "production",
+	)
+
+	authGroup := api.Group("/auth")
+	authGroup.Get("/google/url", auth.GoogleURL)
+	authGroup.Get("/google/callback", auth.GoogleCallback)
+	authGroup.Get("/spotify/url", middleware.RequireAuth(authService), auth.SpotifyURL)
+	authGroup.Get("/spotify/callback", middleware.RequireAuth(authService), auth.SpotifyCallback)
+	authGroup.Delete("/spotify", middleware.RequireAuth(authService), auth.SpotifyDisconnect)
+	authGroup.Get("/me", middleware.RequireAuth(authService), auth.Me)
+	authGroup.Post("/logout", auth.Logout)
+
+	playlists := handlers.NewPlaylistHandler(spotifyIntegration)
+	spotifyGroup := api.Group("/spotify", middleware.RequireAuth(authService))
+	spotifyGroup.Get("/playlists", playlists.ListPlaylists)
+	spotifyGroup.Get("/playlists/:id/tracks", playlists.ListPlaylistTracks)
+	spotifyGroup.Get("/liked", playlists.ListLikedTracks)
 
 	app.Use(static.New("/", static.Config{
 		FS:              staticFS,

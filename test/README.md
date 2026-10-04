@@ -15,3 +15,11 @@ go test -tags=integration ./test/integration/...
 ```
 
 Set `REDIS_URL` when the integration service is not available at `redis://localhost:6379`.
+
+Repository integration tests require PostgreSQL. They create their own schema with GORM `AutoMigrate`, so they run against an empty database:
+
+```sh
+go test -tags=integration ./test/integration/adapters/...
+```
+
+Set `DATABASE_URL` when PostgreSQL is not available at `postgres://user:pass@localhost:5432/discord_bot`; the tests skip when the database cannot be reached.

@@ -42,6 +42,10 @@
     {
       "name": "search",
       "description": "Track search endpoints"
+    },
+    {
+      "name": "playlists",
+      "description": "Spotify playlist browsing endpoints"
     }
   ],
   "paths": {
@@ -651,31 +655,127 @@
         }
       }
     },
-    "/api/auth/spotify/url": {
+    "/api/auth/google/url": {
       "get": {
         "tags": ["auth"],
-        "summary": "Get Spotify auth URL",
-        "description": "Returns the Spotify OAuth authorization URL",
-        "operationId": "getSpotifyAuthUrl",
-        "parameters": [
-          {
-            "name": "userId",
-            "in": "query",
-            "required": true,
-            "description": "Discord user ID",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "summary": "Get Google sign-in URL",
+        "description": "Returns the Google OAuth authorization URL and sets an anti-CSRF state cookie",
+        "operationId": "getGoogleAuthUrl",
         "responses": {
           "200": {
             "description": "Authorization URL",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpotifyAuthUrlResponse"
+                  "$ref": "#/components/schemas/AuthUrlResponse"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/google/callback": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Google OAuth callback",
+        "description": "Completes sign-in, creates the account on first sign-in, sets the session cookie, and redirects to /dashboard",
+        "operationId": "googleCallback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "description": "Authorization code from Google",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "description": "State parameter for CSRF protection",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "302": {"description": "Redirect to /dashboard after successful sign-in"},
+          "400": {
+            "description": "Invalid callback parameters",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Get the signed-in user",
+        "description": "Returns the account for the session cookie",
+        "operationId": "getCurrentUser",
+        "responses": {
+          "200": {
+            "description": "Signed-in account",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AuthUser"}
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Sign out",
+        "description": "Revokes the session and clears the session cookie",
+        "operationId": "logout",
+        "responses": {
+          "200": {
+            "description": "Signed out",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/SuccessResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/spotify/url": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Get Spotify connection URL",
+        "description": "Returns the Spotify OAuth authorization URL for the signed-in user and sets an anti-CSRF state cookie",
+        "operationId": "getSpotifyAuthUrl",
+        "responses": {
+          "200": {
+            "description": "Authorization URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthUrlResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
               }
             }
           }
@@ -686,7 +786,7 @@
       "get": {
         "tags": ["auth"],
         "summary": "Spotify OAuth callback",
-        "description": "Handles the Spotify OAuth callback",
+        "description": "Stores the encrypted Spotify refresh token for the signed-in user and redirects to /settings",
         "operationId": "spotifyCallback",
         "parameters": [
           {
@@ -694,31 +794,31 @@
             "in": "query",
             "required": true,
             "description": "Authorization code from Spotify",
-            "schema": {
-              "type": "string"
-            }
+            "schema": {"type": "string"}
           },
           {
             "name": "state",
             "in": "query",
             "required": true,
             "description": "State parameter for CSRF protection",
-            "schema": {
-              "type": "string"
-            }
+            "schema": {"type": "string"}
           }
         ],
         "responses": {
-          "302": {
-            "description": "Redirect to frontend after successful auth"
-          },
+          "302": {"description": "Redirect to /settings after successful connection"},
           "400": {
             "description": "Invalid callback parameters",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
               }
             }
           }
@@ -729,19 +829,8 @@
       "delete": {
         "tags": ["auth"],
         "summary": "Disconnect Spotify",
-        "description": "Disconnects the user's Spotify account",
+        "description": "Disconnects the signed-in user's Spotify account",
         "operationId": "disconnectSpotify",
-        "parameters": [
-          {
-            "name": "userId",
-            "in": "query",
-            "required": true,
-            "description": "Discord user ID",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Spotify disconnected",
@@ -750,6 +839,14 @@
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse"
                 }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
               }
             }
           }
@@ -790,6 +887,197 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spotify/playlists": {
+      "get": {
+        "tags": ["playlists"],
+        "summary": "List the user's Spotify playlists",
+        "description": "Returns a page of the followed and owned playlists for the signed-in user's connected Spotify account.",
+        "operationId": "listSpotifyPlaylists",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0 },
+            "description": "Number of playlists to skip"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 50 },
+            "description": "Page size (max 50)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of playlists",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PlaylistPage" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "409": {
+            "description": "Spotify not connected, or reconnect required",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "502": {
+            "description": "Spotify unavailable",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spotify/playlists/{id}/tracks": {
+      "get": {
+        "tags": ["playlists"],
+        "summary": "List the tracks in a Spotify playlist",
+        "operationId": "listSpotifyPlaylistTracks",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Spotify playlist ID"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of playlist tracks",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PlaylistTrackPage" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "403": {
+            "description": "The playlist's contents are not readable (Spotify only returns contents for playlists the user owns or collaborates on)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "The playlist was not found or is private",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "409": {
+            "description": "Spotify not connected, or reconnect required",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "502": {
+            "description": "Spotify unavailable",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spotify/liked": {
+      "get": {
+        "tags": ["playlists"],
+        "summary": "List the user's Liked Songs",
+        "operationId": "listSpotifyLikedTracks",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of liked tracks",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PlaylistTrackPage" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "409": {
+            "description": "Spotify not connected, or reconnect required",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "502": {
+            "description": "Spotify unavailable",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
               }
             }
           }
@@ -1092,6 +1380,26 @@
           }
         }
       },
+      "AuthUrlResponse": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "OAuth authorization URL"
+          }
+        }
+      },
+      "AuthUser": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "email": {"type": "string"},
+          "name": {"type": "string"},
+          "picture": {"type": "string", "description": "Google profile picture URL"},
+          "locale": {"type": "string"},
+          "spotifyConnected": {"type": "boolean"}
+        }
+      },
       "SearchRequest": {
         "type": "object",
         "properties": {
@@ -1146,6 +1454,67 @@
           "code": {
             "type": "string",
             "description": "Error code"
+          }
+        }
+      },
+      "Playlist": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Spotify playlist ID" },
+          "name": { "type": "string", "description": "Playlist name" },
+          "description": { "type": "string", "description": "Playlist description" },
+          "owner": { "type": "string", "description": "Display name of the playlist owner" },
+          "trackCount": { "type": "integer", "description": "Number of tracks when Spotify exposes it, otherwise 0" },
+          "imageUrl": { "type": "string", "description": "Cover image URL" },
+          "url": { "type": "string", "description": "Open in Spotify URL" },
+          "isOwned": { "type": "boolean", "description": "True when the connected user owns the playlist" },
+          "collaborative": { "type": "boolean", "description": "True for collaborative playlists" },
+          "browseable": { "type": "boolean", "description": "True when Spotify exposes this playlist's contents to the app (owned or collaborative playlists in Development Mode)" }
+        },
+        "required": ["id", "name"]
+      },
+      "PlaylistTrack": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Spotify track ID" },
+          "title": { "type": "string", "description": "Track title" },
+          "artists": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Track artists"
+          },
+          "album": { "type": "string", "description": "Album name" },
+          "durationMs": { "type": "integer", "description": "Duration in milliseconds" },
+          "imageUrl": { "type": "string", "description": "Album image URL" },
+          "url": { "type": "string", "description": "Open in Spotify URL" }
+        },
+        "required": ["id", "title", "artists"]
+      },
+      "PlaylistPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Playlist" }
+          },
+          "next": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Offset for the next page, or null when the list is exhausted"
+          }
+        }
+      },
+      "PlaylistTrackPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PlaylistTrack" }
+          },
+          "next": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Offset for the next page, or null when the list is exhausted"
           }
         }
       }

@@ -16,6 +16,11 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       DISCORD_APP_ID: ${DISCORD_APP_ID:-}
       GUILD_ID: ${GUILD_ID:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/api/auth/google/callback}
+      AUTH_ENCRYPTION_KEY: "${AUTH_ENCRYPTION_KEY:?AUTH_ENCRYPTION_KEY is required - generate one with openssl rand -base64 32}"
+      SESSION_TTL: ${SESSION_TTL:-720h}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-http://localhost:3000/api/auth/spotify/callback}
