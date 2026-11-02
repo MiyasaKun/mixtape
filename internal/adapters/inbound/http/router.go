@@ -12,7 +12,7 @@ import (
 	"github.com/gofiber/contrib/v3/swaggerui"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
-	fiberlogger "github.com/gofiber/fiber/v3/middleware/logger"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/gofiber/fiber/v3/middleware/static"
 )
 
@@ -24,6 +24,7 @@ type Router struct {
 func NewRouter(
 	cfg *config.Config,
 	appLogger *logging.Logger,
+	httpMetrics middleware.HTTPMetrics,
 	musicPlayback *services.MusicPlaybackService,
 	queue *services.QueueService,
 	guildConfig *services.GuildConfigService,
@@ -44,9 +45,10 @@ func NewRouter(
 		AllowHeaders: []string{"*"},
 	}))
 
-	app.Use(fiberlogger.New(fiberlogger.Config{
-		Format: "[${ip}]:${port} ${status} - ${method} ${path}\n",
-	}))
+	// Correlation first so every later log line and metric can carry the id.
+	app.Use(requestid.New())
+	app.Use(middleware.ObserveRequests(httpMetrics))
+	app.Use(middleware.RequestLog(appLogger))
 	app.Use(swaggerui.New(swaggerui.Config{
 		BasePath: "/",
 		FilePath: "./docs/swagger.json",

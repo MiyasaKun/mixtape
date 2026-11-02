@@ -3,6 +3,7 @@ package discord
 import (
 	"context"
 
+	"fiber_test/internal/application/ports"
 	"fiber_test/internal/application/services"
 	"fiber_test/internal/infrastructure/logging"
 
@@ -22,6 +23,7 @@ const guildID = ""
 type Bot struct {
 	client             *bot.Client
 	logger             *logging.Logger
+	metrics            ports.Metrics
 	commands           map[string]Command
 	musicPlayback      *services.MusicPlaybackService
 	queue              *services.QueueService
@@ -32,11 +34,15 @@ type Bot struct {
 func NewBot(
 	token string,
 	logger *logging.Logger,
+	metrics ports.Metrics,
 	musicPlayback *services.MusicPlaybackService,
 	queue *services.QueueService,
 	guildConfig *services.GuildConfigService,
 	spotifyIntegration *services.SpotifyIntegrationService,
 ) *Bot {
+	if metrics == nil {
+		metrics = ports.NewNoopMetrics()
+	}
 	client, _ := disgo.New(token,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
@@ -55,6 +61,7 @@ func NewBot(
 	b := &Bot{
 		client:             client,
 		logger:             logger,
+		metrics:            metrics,
 		commands:           make(map[string]Command),
 		musicPlayback:      musicPlayback,
 		queue:              queue,
@@ -116,9 +123,16 @@ func (b *Bot) handleInteraction(e *events.ApplicationCommandInteractionCreate) {
 	data := e.SlashCommandInteractionData()
 	cmdName := data.CommandName()
 
+	log := b.logger.With(
+		"command", cmdName,
+		"guild_id", guildIDString(e.GuildID()),
+		"user_id", e.User().ID.String(),
+	)
+
 	cmd, exists := b.commands[cmdName]
 	if !exists {
-		b.logger.Warn("unknown command received", "command", cmdName)
+		log.Warn("unknown command received")
+		b.metrics.CommandHandled(cmdName, "unknown")
 		return
 	}
 
@@ -129,12 +143,26 @@ func (b *Bot) handleInteraction(e *events.ApplicationCommandInteractionCreate) {
 		Options:     parseOptions(e),
 	}
 
+	log.Info("command received", "options", ctx.Options)
+
 	if err := cmd.Handle(ctx); err != nil {
-		b.logger.Error("command handler failed", "command", cmdName, "error", err)
+		log.Error("command handler failed", "error", err)
+		b.metrics.CommandHandled(cmdName, "error")
 		if respondErr := ctx.Respond(formatCommandError(cmdName, err)); respondErr != nil {
-			b.logger.Error("failed to send error response", "error", respondErr)
+			log.Error("failed to send error response", "respond_error", respondErr)
 		}
+		return
 	}
+	b.metrics.CommandHandled(cmdName, "ok")
+	log.Debug("command completed")
+}
+
+// guildIDString renders an optional guild ID for logging attributes.
+func guildIDString(guildID *snowflake.ID) string {
+	if guildID == nil {
+		return ""
+	}
+	return guildID.String()
 }
 
 func (b *Bot) handleGuildVoiceJoin(e *events.GuildVoiceJoin) {

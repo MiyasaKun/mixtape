@@ -19,6 +19,7 @@ import (
 	"fiber_test/internal/application/services"
 	"fiber_test/internal/infrastructure/config"
 	"fiber_test/internal/infrastructure/logging"
+	"fiber_test/internal/infrastructure/otel"
 	"fiber_test/template"
 )
 
@@ -26,6 +27,31 @@ func main() {
 
 	cfg := config.Load()
 	logger := logging.NewLogger(cfg.Env)
+
+	// Telemetry is opt-in: with OTEL_EXPORTER_OTLP_ENDPOINT unset this is a
+	// disabled setup handing out no-op sinks.
+	ctx, stopTelemetry := context.WithCancel(context.Background())
+	telemetry, err := otel.Setup(ctx, otel.Config{
+		Endpoint:    cfg.OTelEndpoint,
+		ServiceName: cfg.OTelServiceName,
+		Env:         cfg.Env,
+	})
+	if err != nil {
+		logger.Error("failed to initialize telemetry", "error", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
+			logger.Error("failed to flush telemetry", "error", err)
+		}
+	}()
+	defer stopTelemetry()
+
+	// Console stays the primary sink; OTLP logs ride alongside when enabled.
+	if telemetry.Enabled {
+		logger = logging.NewLogger(cfg.Env, telemetry.LogHandler)
+	}
 
 	db, err := postgres.New(cfg.DatabaseURL, logger, cfg.Env)
 	if err != nil {
@@ -56,6 +82,8 @@ func main() {
 	googleClient := google.New(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURI)
 	youtubeClient := youtube.New()
 	soundcloudClient := soundcloud.New()
+	metrics := telemetry.Metrics()
+	telemetryDep := services.Telemetry{Logger: logger, Metrics: metrics}
 
 	encryptor, err := crypto.New(cfg.AuthEncryptionKey)
 	if err != nil {
@@ -68,15 +96,16 @@ func main() {
 
 	authService := services.NewAuthService(users, sessions, googleClient, time.Now, cfg.SessionTTL)
 
-	trackResolver := services.NewTrackResolverService(youtubeClient, spotifyClient, soundcloudClient)
-	queueService := services.NewQueueService(cache)
-	musicPlayback := services.NewMusicPlaybackService(queueService, trackResolver, youtubeClient)
+	trackResolver := services.NewTrackResolverService(youtubeClient, spotifyClient, soundcloudClient, telemetryDep)
+	queueService := services.NewQueueService(cache, telemetryDep)
+	musicPlayback := services.NewMusicPlaybackService(queueService, trackResolver, youtubeClient, telemetryDep)
 	guildConfigService := services.NewGuildConfigService(db)
 	spotifyIntegration := services.NewSpotifyIntegrationService(spotifyClient, spotifyConnections, encryptor, time.Now)
 
 	httpRouter := http.NewRouter(
 		cfg,
 		logger,
+		telemetry.HTTPMetrics(),
 		musicPlayback,
 		queueService,
 		guildConfigService,
@@ -88,6 +117,7 @@ func main() {
 	discordBot := discord.NewBot(
 		cfg.DiscordBotToken,
 		logger,
+		metrics,
 		musicPlayback,
 		queueService,
 		guildConfigService,

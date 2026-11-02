@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"fiber_test/internal/adapters/outbound/redis"
+	"fiber_test/internal/application/ports"
+	"fiber_test/internal/infrastructure/logging"
 
 	redispkg "github.com/redis/go-redis/v9"
 )
@@ -20,15 +22,22 @@ const queueKeyPrefix = "mixtape:queue:"
 // serializes read-modify-write operations so concurrent updates from
 // commands and the playback loop cannot clobber each other.
 type QueueService struct {
-	cache *redis.Redis
+	cache   *redis.Redis
+	logger  *logging.Logger
+	metrics ports.Metrics
 
 	mu sync.Mutex
 }
 
 // NewQueueService builds a queue service backed by the given Redis cache.
-func NewQueueService(cache *redis.Redis) *QueueService {
+// Telemetry is an optional trailing option; without it the service logs to a
+// discard sink and emits no metrics.
+func NewQueueService(cache *redis.Redis, telem ...Telemetry) *QueueService {
+	deps := resolveTelemetry(telem)
 	return &QueueService{
-		cache: cache,
+		cache:   cache,
+		logger:  deps.logger,
+		metrics: deps.metrics,
 	}
 }
 
@@ -52,11 +61,14 @@ func (s *QueueService) GetQueue(ctx context.Context, guildID string) (*Queue, er
 // AddToQueue appends a track to the guild's queue, creating the queue if it
 // does not exist yet.
 func (s *QueueService) AddToQueue(ctx context.Context, guildID string, track *Track) error {
+	log := s.logger.With("guild_id", guildID)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	queue, err := s.getQueue(ctx, guildID)
 	if err != nil {
+		log.Error("failed to read queue before adding track", "error", err)
 		return err
 	}
 	if queue == nil {
@@ -64,7 +76,14 @@ func (s *QueueService) AddToQueue(ctx context.Context, guildID string, track *Tr
 	}
 	queue.Tracks = append(queue.Tracks, track)
 
-	return s.saveQueue(ctx, queue)
+	if err := s.saveQueue(ctx, queue); err != nil {
+		log.Error("failed to persist queue after adding track", "track", track.Title, "error", err)
+		return err
+	}
+
+	s.metrics.QueueDepth(guildID, len(queue.Tracks))
+	log.Debug("track added to queue", "track", track.Title, "depth", len(queue.Tracks))
+	return nil
 }
 
 // SaveQueue persists a queue for the playback service after it advances to a
@@ -97,7 +116,13 @@ func (s *QueueService) RemoveFromQueue(ctx context.Context, guildID string, inde
 
 // ClearQueue removes the entire queue for a guild.
 func (s *QueueService) ClearQueue(ctx context.Context, guildID string) error {
-	return s.cache.Client().Del(ctx, queueKey(guildID)).Err()
+	if err := s.cache.Client().Del(ctx, queueKey(guildID)).Err(); err != nil {
+		s.logger.With("guild_id", guildID).Error("failed to clear queue", "error", err)
+		return err
+	}
+	s.metrics.QueueDepth(guildID, 0)
+	s.logger.With("guild_id", guildID).Info("queue cleared")
+	return nil
 }
 
 // ShuffleQueue randomly reorders the tracks in a guild's queue.
