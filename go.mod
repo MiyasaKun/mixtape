@@ -3,7 +3,7 @@ module fiber_test
 go 1.27.0
 
 require (
-	github.com/disgoorg/disgo v0.19.6
+	github.com/disgoorg/disgo v0.20.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/gofiber/contrib/v3/swaggerui v1.0.10
 	github.com/gofiber/fiber/v3 v3.5.0
@@ -20,7 +20,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/disgoorg/godave v0.2.0 // indirect
+	github.com/disgoorg/godave v0.3.0 // indirect
 	github.com/disgoorg/json/v2 v2.0.0 // indirect
 	github.com/disgoorg/omit v1.0.0 // indirect
 	github.com/go-openapi/runtime/server-middleware v0.33.0 // indirect
