@@ -95,7 +95,7 @@ func main() {
 	)
 
 	discordBot.RegisterCommands(
-		commands.NewPlayCommand(musicPlayback),
+		commands.NewPlayCommand(musicPlayback, trackResolver, discordBot.Selections(), logger),
 		commands.NewSkipCommand(musicPlayback),
 		commands.NewQueueCommand(musicPlayback, queueService),
 		commands.NewNowPlayingCommand(musicPlayback),

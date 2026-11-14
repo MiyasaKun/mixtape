@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fiber_test/internal/application/ports"
@@ -53,6 +54,10 @@ type player struct {
 	// waiting goroutine captures the generation of its own track and bails
 	// out if the generation has moved on (stale auto-advance).
 	gen int
+	// frames counts the Opus frames handed out for the current track. One
+	// frame is 20ms of audio, so frames × 20ms is the playback position.
+	// It is reset per track in advance and nil'd when playback stops.
+	frames *int64
 	// idleTimer disconnects a connected guild that has no active playback.
 	idleTimer *time.Timer
 	// idleToken invalidates callbacks from timers that have been reset.
@@ -115,6 +120,18 @@ func (s *MusicPlaybackService) Disconnect(ctx context.Context, guildID string) {
 // if nothing is playing yet. The returned PlaybackResult describes whether a
 // new track started or was merely queued.
 func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query string) (*PlaybackResult, error) {
+	return s.playWithCover(ctx, guildID, query, "")
+}
+
+// PlayWithCover behaves like Play but, when coverURL is set, overrides the
+// resolved track's thumbnail with it and marks the track's Source as
+// "spotify" (the stream still comes from YouTube; Source documents the link
+// origin, e.g. for the /nowplaying panel footer).
+func (s *MusicPlaybackService) PlayWithCover(ctx context.Context, guildID, query, coverURL string) (*PlaybackResult, error) {
+	return s.playWithCover(ctx, guildID, query, coverURL)
+}
+
+func (s *MusicPlaybackService) playWithCover(ctx context.Context, guildID, query, coverURL string) (*PlaybackResult, error) {
 	s.mu.Lock()
 	p := s.player(guildID)
 	conn := p.conn
@@ -129,6 +146,13 @@ func (s *MusicPlaybackService) Play(ctx context.Context, guildID string, query s
 	track, err := s.trackResolver.Resolve(ctx, query)
 	if err != nil {
 		return nil, err
+	}
+
+	// A spotify cover means the user started playback from a spotify link:
+	// show the album art and remember the link origin.
+	if coverURL != "" {
+		track.ThumbnailURL = coverURL
+		track.Source = "spotify"
 	}
 
 	if err := s.queue.AddToQueue(ctx, guildID, track); err != nil {
@@ -206,6 +230,48 @@ func (s *MusicPlaybackService) GetCurrentTrack(ctx context.Context, guildID stri
 	return p.current, nil
 }
 
+// frameCounter counts the frames handed out by the wrapped FrameProvider.
+// Each Opus frame is 20ms of audio, which is the playback position source of
+// truth — counting frames avoids drift from wall-clock timers.
+type frameCounter struct {
+	ports.FrameProvider
+	frames *int64
+}
+
+func (f frameCounter) ProvideFrame() ([]byte, error) {
+	atomic.AddInt64(f.frames, 1)
+	return f.FrameProvider.ProvideFrame()
+}
+
+// PlaybackStatus is a snapshot of what a guild is currently playing and how
+// far into the track playback has progressed.
+type PlaybackStatus struct {
+	Track *Track
+	// Elapsed is the position inside the current track: the number of
+	// delivered Opus frames × 20ms frame duration.
+	Elapsed time.Duration
+}
+
+// GetPlaybackStatus returns the current playback snapshot for the guild, or
+// nil when nothing is playing (mirrors GetCurrentTrack).
+func (s *MusicPlaybackService) GetPlaybackStatus(ctx context.Context, guildID string) (*PlaybackStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p := s.player(guildID)
+	if !p.playing {
+		return nil, nil
+	}
+	var frames int64
+	if p.frames != nil {
+		frames = atomic.LoadInt64(p.frames)
+	}
+	return &PlaybackStatus{
+		Track:   p.current,
+		Elapsed: time.Duration(frames) * 20 * time.Millisecond,
+	}, nil
+}
+
 // playNext is a convenience wrapper for advance triggered from outside the
 // playback loop.
 func (s *MusicPlaybackService) playNext(ctx context.Context, guildID string) error {
@@ -271,7 +337,12 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 	}
 	advanceCtx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	p.provider = provider
+	// Wrap the provider so every frame handed to the voice connection
+	// advances the position counter (20ms per frame). The connection gets
+	// the wrapped provider so even externally pulled frames count.
+	counter := frameCounter{FrameProvider: provider, frames: new(int64)}
+	p.provider = counter
+	p.frames = counter.frames
 	p.current = track
 	p.playing = true
 	// The idle timer may have been armed while the track was resolving. Stop
@@ -286,7 +357,7 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 	}
 
 	// Hand the provider to the voice connection; disgo starts pulling frames.
-	conn.SetFrameProvider(provider)
+	conn.SetFrameProvider(counter)
 
 	// Wait for the track to finish (or for it to be skipped/stopped) and then
 	// advance to the next track. Uses a background context because it runs
@@ -311,6 +382,7 @@ func (s *MusicPlaybackService) stop(guildID string, p *player) {
 	s.mu.Lock()
 	p.playing = false
 	p.current = nil
+	p.frames = nil
 	provider := p.provider
 	p.provider = nil
 	if p.cancel != nil {
@@ -380,6 +452,7 @@ func (s *MusicPlaybackService) clearPlayerLocked(p *player) (ports.FrameProvider
 	p.provider = nil
 	p.conn = nil
 	p.current = nil
+	p.frames = nil
 	p.playing = false
 	return provider, conn
 }

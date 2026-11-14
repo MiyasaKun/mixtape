@@ -36,14 +36,30 @@ const (
 	ytDlpRetryDelay  = 300 * time.Millisecond
 )
 
+// Option customises a YouTube adapter.
+type Option func(*YouTube)
+
+// WithRunner replaces the yt-dlp execution function. It is intended for
+// tests; production always uses the real yt-dlp runner.
+func WithRunner(run func(ctx context.Context, args ...string) ([]byte, error)) Option {
+	return func(y *YouTube) {
+		y.runner = run
+	}
+}
+
 // YouTube provides track resolution and audio streaming for YouTube videos
 // via the yt-dlp and ffmpeg external binaries.
 type YouTube struct {
+	runner func(ctx context.Context, args ...string) ([]byte, error)
 }
 
 // New returns a YouTube adapter.
-func New() *YouTube {
-	return &YouTube{}
+func New(opts ...Option) *YouTube {
+	y := &YouTube{}
+	for _, opt := range opts {
+		opt(y)
+	}
+	return y
 }
 
 // Track holds the metadata of a resolved YouTube video.
@@ -64,12 +80,24 @@ type ytDlpInfo struct {
 	Channel    string `json:"channel"`
 	Duration   int64  `json:"duration"`
 	Thumbnail  string `json:"thumbnail"`
+	// --flat-playlist search entries carry the video URL in "url", while
+	// full -J dumps use "webpage_url". Either is accepted.
 	WebpageURL string `json:"webpage_url"`
+	URL        string `json:"url"`
+}
+
+// videoURL returns the effective watch URL of the entry, preferring the full
+// dump's webpage_url over the flat entry's url field.
+func (i ytDlpInfo) videoURL() string {
+	if i.WebpageURL != "" {
+		return i.WebpageURL
+	}
+	return i.URL
 }
 
 // Resolve extracts metadata for the given video URL (or ytsearch: query).
 func (y *YouTube) Resolve(ctx context.Context, url string) (*Track, error) {
-	out, err := y.runYTDLP(ctx, "--no-playlist", "-J", url)
+	out, err := y.ytdlp(ctx, "--no-playlist", "-J", url)
 	if err != nil {
 		return nil, errors.New("failed to resolve track metadata: " + err.Error())
 	}
@@ -89,14 +117,57 @@ func (y *YouTube) Resolve(ctx context.Context, url string) (*Track, error) {
 	}, nil
 }
 
-// Stream resolves the direct audio URL of the given video and returns an
-// Opus FrameProvider for it.
-func (y *YouTube) Stream(ctx context.Context, url string) (ports.FrameProvider, error) {
-	streamURL, err := y.resolveStreamURL(ctx, url)
-	if err != nil {
-		return nil, err
+// Search performs a YouTube search via yt-dlp's ytsearch and returns up to
+// limit candidate tracks. It uses --flat-playlist so only metadata (no
+// formats) is extracted, keeping the call fast.
+func (y *YouTube) Search(ctx context.Context, query string, limit int) ([]Track, error) {
+	if limit <= 0 {
+		limit = 5
 	}
-	return newStreamProvider(ctx, streamURL)
+	out, err := y.ytdlp(ctx, "--no-playlist", "--flat-playlist", "-J", fmt.Sprintf("ytsearch%d:%s", limit, query))
+	if err != nil {
+		return nil, errors.New("failed to search youtube: " + err.Error())
+	}
+
+	var payload struct {
+		Entries []ytDlpInfo `json:"entries"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return nil, errors.New("failed to parse search results: " + err.Error())
+	}
+
+	tracks := make([]Track, 0, len(payload.Entries))
+	for _, info := range payload.Entries {
+		if info.videoURL() == "" {
+			continue
+		}
+		tracks = append(tracks, Track{
+			ID:           info.ID,
+			Title:        info.Title,
+			Artist:       info.Channel,
+			Duration:     info.Duration,
+			ThumbnailURL: info.Thumbnail,
+			URL:          info.videoURL(),
+		})
+	}
+	return tracks, nil
+}
+
+// Stream starts yt-dlp downloading the best audio to stdout and pipes it
+// into ffmpeg. yt-dlp performs the HTTP fetch itself (headers, PO tokens,
+// SABR), because direct ffmpeg fetches of googlevideo URLs are rejected with
+// 403 by YouTube.
+func (y *YouTube) Stream(ctx context.Context, url string) (ports.FrameProvider, error) {
+	return newYTDLPStreamProvider(ctx, url)
+}
+
+// ytdlp runs yt-dlp through the injected runner when one is set (tests),
+// otherwise through the real runner.
+func (y *YouTube) ytdlp(ctx context.Context, args ...string) ([]byte, error) {
+	if y.runner != nil {
+		return y.runner(ctx, args...)
+	}
+	return y.runYTDLP(ctx, args...)
 }
 
 // runYTDLP executes yt-dlp with the given arguments and retries on error or
@@ -135,38 +206,13 @@ func (y *YouTube) runYTDLP(ctx context.Context, args ...string) ([]byte, error) 
 	return nil, lastErr
 }
 
-// resolveStreamURL runs yt-dlp -g to print the direct URL of the best audio
-// format. The first non-empty output line is used so stray extra lines (e.g.
-// from playlist URLs) cannot corrupt the result.
-func (y *YouTube) resolveStreamURL(ctx context.Context, url string) (string, error) {
-	out, err := y.runYTDLP(ctx, "--no-playlist", "-f", "bestaudio", "-g", url)
-	if err != nil {
-		return "", errors.New("failed to resolve audio stream: " + err.Error())
-	}
-
-	streamURL := firstNonEmptyLine(out)
-	if streamURL == "" {
-		return "", errors.New("yt-dlp returned no audio stream URL")
-	}
-	return streamURL, nil
-}
-
-// firstNonEmptyLine returns the first non-whitespace line of b.
-func firstNonEmptyLine(b []byte) string {
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return line
-		}
-	}
-	return ""
-}
-
-// streamProvider is a FrameProvider backed by an ffmpeg process. ffmpeg
-// transcodes the source audio to raw s16le PCM at 48kHz stereo on stdout;
-// each 20ms chunk is encoded to an Opus frame in-process with gopus.
+// streamProvider is a FrameProvider backed by a yt-dlp → ffmpeg process
+// chain. yt-dlp downloads the source audio to stdout; ffmpeg transcodes the
+// stream to raw s16le PCM at 48kHz stereo; each 20ms chunk is encoded to an
+// Opus frame in-process with gopus.
 type streamProvider struct {
-	cmd           *exec.Cmd
+	ytdlpCmd      *exec.Cmd
+	ffmpegCmd     *exec.Cmd
 	stdout        io.ReadCloser
 	enc           *gopus.Encoder
 	processCancel context.CancelFunc
@@ -181,36 +227,65 @@ type streamProvider struct {
 	pcmBytes [pcmFrameBytes]byte
 }
 
-// newStreamProvider starts ffmpeg decoding the given stream URL and returns
-// a provider feeding its PCM output.
-func newStreamProvider(ctx context.Context, streamURL string) (ports.FrameProvider, error) {
+// newYTDLPStreamProvider starts the yt-dlp → ffmpeg process chain and
+// returns a provider feeding its PCM output.
+func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvider, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
 	// The command that requested playback may finish before the track does.
-	// The provider owns the ffmpeg process after it has been created, so only
-	// Close (skip, disconnect, or end of stream) can stop it.
+	// The provider owns both processes after they have been created, so only
+	// Close (skip, disconnect, or end of stream) can stop them.
 	processCtx, processCancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(processCtx, "ffmpeg",
-		"-nostdin", "-hide_banner", "-loglevel", "error",
-		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-		"-i", streamURL,
-		"-f", "s16le", "-ar", "48000", "-ac", "2",
-		"pipe:1",
+
+	ytdlpCmd := exec.CommandContext(processCtx, "yt-dlp",
+		"--no-playlist", "-f", "bestaudio", "-o", "-", url,
 	)
-	stdout, err := cmd.StdoutPipe()
+	ytdlpStdout, err := ytdlpCmd.StdoutPipe()
 	if err != nil {
 		processCancel()
 		return nil, err
 	}
-	stderr := &bytes.Buffer{}
-	cmd.Stderr = stderr
+	ytdlpStderr := &bytes.Buffer{}
+	ytdlpCmd.Stderr = ytdlpStderr
 
-	if err := cmd.Start(); err != nil {
+	ffmpegCmd := exec.CommandContext(processCtx, "ffmpeg",
+		"-nostdin", "-hide_banner", "-loglevel", "error",
+		"-i", "pipe:0",
+		"-f", "s16le", "-ar", "48000", "-ac", "2",
+		"pipe:1",
+	)
+	ffmpegStdin, err := ffmpegCmd.StdinPipe()
+	if err != nil {
 		processCancel()
 		return nil, err
 	}
+	ffmpegStdout, err := ffmpegCmd.StdoutPipe()
+	if err != nil {
+		processCancel()
+		return nil, err
+	}
+	ffmpegStderr := &bytes.Buffer{}
+	ffmpegCmd.Stderr = ffmpegStderr
+
+	// yt-dlp's stdout feeds ffmpeg's stdin. The copy goroutine closes the
+	// pipe when the download ends so ffmpeg sees EOF and exits cleanly.
+
+	if err := ffmpegCmd.Start(); err != nil {
+		processCancel()
+		return nil, err
+	}
+	if err := ytdlpCmd.Start(); err != nil {
+		processCancel()
+		ffmpegCmd.Process.Kill()
+		ffmpegCmd.Wait()
+		return nil, err
+	}
+	go func() {
+		defer ffmpegStdin.Close()
+		_, _ = io.Copy(ffmpegStdin, ytdlpStdout)
+	}()
 
 	enc, err := gopus.NewEncoder(gopus.EncoderConfig{
 		SampleRate:  sampleRate,
@@ -219,17 +294,20 @@ func newStreamProvider(ctx context.Context, streamURL string) (ports.FrameProvid
 	})
 	if err != nil {
 		processCancel()
-		cmd.Process.Kill()
-		cmd.Wait()
+		ytdlpCmd.Process.Kill()
+		ytdlpCmd.Wait()
+		ffmpegCmd.Process.Kill()
+		ffmpegCmd.Wait()
 		return nil, err
 	}
 
 	return &streamProvider{
-		cmd:           cmd,
-		stdout:        stdout,
+		ytdlpCmd:      ytdlpCmd,
+		ffmpegCmd:     ffmpegCmd,
+		stdout:        ffmpegStdout,
 		enc:           enc,
 		processCancel: processCancel,
-		stderr:        stderr,
+		stderr:        ytdlpStderr,
 		done:          make(chan struct{}),
 	}, nil
 }
@@ -282,15 +360,21 @@ func (p *streamProvider) Close() {
 }
 
 // finish tears down the provider exactly once: it closes the done channel
-// and terminates ffmpeg. Killing ffmpeg also unblocks any read on stdout.
+// and terminates both processes. Killing them also unblocks any read on the
+// pipes. ffmpeg's Wait error preserves a real stream failure; a killed
+// yt-dlp (whose output ffmpeg already consumed) is not an error.
 func (p *streamProvider) finish() {
 	p.doneOnce.Do(func() {
 		close(p.done)
 		p.processCancel()
-		if p.cmd != nil && p.cmd.Process != nil {
-			p.cmd.Process.Kill()
+		if p.ytdlpCmd != nil && p.ytdlpCmd.Process != nil {
+			p.ytdlpCmd.Process.Kill()
 		}
-		p.processErr = p.cmd.Wait()
+		_ = p.ytdlpCmd.Wait()
+		if p.ffmpegCmd != nil && p.ffmpegCmd.Process != nil {
+			p.ffmpegCmd.Process.Kill()
+		}
+		p.processErr = p.ffmpegCmd.Wait()
 	})
 }
 
