@@ -5,6 +5,7 @@
 package youtube
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -12,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -47,15 +49,40 @@ func WithRunner(run func(ctx context.Context, args ...string) ([]byte, error)) O
 	}
 }
 
+// WithStreamSpawner replaces the function that starts the yt-dlp → ffmpeg
+// process chain. It is intended for tests; production always spawns the
+// real chain.
+func WithStreamSpawner(spawn func(ctx context.Context, url string) (ports.FrameProvider, error)) Option {
+	return func(y *YouTube) {
+		y.spawnStream = spawn
+	}
+}
+
+// WithStreamRetryDelay overrides the pause between stream spawn retries.
+// It is intended for tests.
+func WithStreamRetryDelay(d time.Duration) Option {
+	return func(y *YouTube) {
+		y.streamRetryDelay = d
+	}
+}
+
 // YouTube provides track resolution and audio streaming for YouTube videos
 // via the yt-dlp and ffmpeg external binaries.
 type YouTube struct {
 	runner func(ctx context.Context, args ...string) ([]byte, error)
+	// spawnStream starts the audio process chain. The retry loop in Stream
+	// calls it up to maxYTDLPAttempts times, because YouTube intermittently
+	// rejects the download with 403 (SABR enforcement).
+	spawnStream      func(ctx context.Context, url string) (ports.FrameProvider, error)
+	streamRetryDelay time.Duration
 }
 
 // New returns a YouTube adapter.
 func New(opts ...Option) *YouTube {
-	y := &YouTube{}
+	y := &YouTube{
+		spawnStream:      newYTDLPStreamProvider,
+		streamRetryDelay: ytDlpRetryDelay,
+	}
 	for _, opt := range opts {
 		opt(y)
 	}
@@ -158,7 +185,31 @@ func (y *YouTube) Search(ctx context.Context, query string, limit int) ([]Track,
 // SABR), because direct ffmpeg fetches of googlevideo URLs are rejected with
 // 403 by YouTube.
 func (y *YouTube) Stream(ctx context.Context, url string) (ports.FrameProvider, error) {
-	return newYTDLPStreamProvider(ctx, url)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// The process chain is retried as a whole: YouTube intermittently answers
+	// with 403 during extraction/download (SABR enforcement), and a fresh
+	// attempt usually succeeds. The spawner only returns a provider once the
+	// chain has proven itself (first byte of audio arrived), so a returned
+	// error always means no audio was produced and a retry is safe.
+	var lastErr error
+	for attempt := 0; attempt < maxYTDLPAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(y.streamRetryDelay):
+			}
+		}
+		provider, err := y.spawnStream(ctx, url)
+		if err == nil {
+			return provider, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // ytdlp runs yt-dlp through the injected runner when one is set (tests),
@@ -179,6 +230,9 @@ func (y *YouTube) runYTDLP(ctx context.Context, args ...string) ([]byte, error) 
 	for attempt := 0; attempt < maxYTDLPAttempts; attempt++ {
 		var stderr bytes.Buffer
 		cmd := exec.CommandContext(ctx, "yt-dlp", args...)
+		// The container user cannot write to /, so point yt-dlp's cache at
+		// a writable location (see newYTDLPStreamProvider).
+		cmd.Env = append(os.Environ(), "XDG_CACHE_HOME=/tmp/yt-dlp-cache", "HOME=/tmp")
 		cmd.Stderr = &stderr
 
 		out, err := cmd.Output()
@@ -229,6 +283,11 @@ type streamProvider struct {
 
 // newYTDLPStreamProvider starts the yt-dlp → ffmpeg process chain and
 // returns a provider feeding its PCM output.
+//
+// It waits for the first byte of audio before returning: if yt-dlp fails
+// (for example YouTube's intermittent 403) the error is reported here so
+// the retry loop in Stream can start a fresh chain. Once audio has flowed,
+// failures are handled by the provider itself.
 func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvider, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -239,9 +298,15 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 	// Close (skip, disconnect, or end of stream) can stop them.
 	processCtx, processCancel := context.WithCancel(context.Background())
 
+	// The container user cannot write to /, so point yt-dlp's cache at a
+	// writable location. Persisting solved signature functions avoids
+	// re-running the JS challenge on every invocation.
+	cacheEnv := []string{"XDG_CACHE_HOME=/tmp/yt-dlp-cache", "HOME=/tmp"}
+
 	ytdlpCmd := exec.CommandContext(processCtx, "yt-dlp",
 		"--no-playlist", "-f", "bestaudio", "-o", "-", url,
 	)
+	ytdlpCmd.Env = append(os.Environ(), cacheEnv...)
 	ytdlpStdout, err := ytdlpCmd.StdoutPipe()
 	if err != nil {
 		processCancel()
@@ -269,9 +334,6 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 	ffmpegStderr := &bytes.Buffer{}
 	ffmpegCmd.Stderr = ffmpegStderr
 
-	// yt-dlp's stdout feeds ffmpeg's stdin. The copy goroutine closes the
-	// pipe when the download ends so ffmpeg sees EOF and exits cleanly.
-
 	if err := ffmpegCmd.Start(); err != nil {
 		processCancel()
 		return nil, err
@@ -282,9 +344,54 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 		ffmpegCmd.Wait()
 		return nil, err
 	}
+
+	// Probe phase: wait until yt-dlp either produces its first byte of audio
+	// or exits with an error. The buffered reader is handed to the copy
+	// goroutine afterwards, so no data is lost.
+	reader := bufio.NewReader(ytdlpStdout)
+	firstByte := make(chan error, 1)
+	go func() {
+		_, err := reader.ReadByte()
+		firstByte <- err
+	}()
+	ytdlpDone := make(chan error, 1)
+	go func() {
+		ytdlpDone <- ytdlpCmd.Wait()
+	}()
+
+	var probeErr error
+	select {
+	case probeErr = <-firstByte:
+		if probeErr == nil {
+			break // audio is flowing; hand the chain to the provider below.
+		}
+		// Reader error before any audio: treat like an exited process.
+		select {
+		case waitErr := <-ytdlpDone:
+			probeErr = waitErr
+		default:
+		}
+	case waitErr := <-ytdlpDone:
+		probeErr = waitErr
+	}
+	if probeErr != nil {
+		processCancel()
+		ytdlpCmd.Process.Kill()
+		_ = ytdlpCmd.Wait()
+		ffmpegCmd.Process.Kill()
+		_ = ffmpegCmd.Wait()
+		detail := strings.TrimSpace(ytdlpStderr.String())
+		if detail == "" {
+			detail = probeErr.Error()
+		}
+		return nil, fmt.Errorf("yt-dlp stream failed: %s", detail)
+	}
+
+	// yt-dlp's stdout feeds ffmpeg's stdin. The copy goroutine closes the
+	// pipe when the download ends so ffmpeg sees EOF and exits cleanly.
 	go func() {
 		defer ffmpegStdin.Close()
-		_, _ = io.Copy(ffmpegStdin, ytdlpStdout)
+		_, _ = io.Copy(ffmpegStdin, reader)
 	}()
 
 	enc, err := gopus.NewEncoder(gopus.EncoderConfig{
@@ -295,9 +402,9 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 	if err != nil {
 		processCancel()
 		ytdlpCmd.Process.Kill()
-		ytdlpCmd.Wait()
+		_ = ytdlpCmd.Wait()
 		ffmpegCmd.Process.Kill()
-		ffmpegCmd.Wait()
+		_ = ffmpegCmd.Wait()
 		return nil, err
 	}
 
