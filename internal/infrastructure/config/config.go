@@ -24,6 +24,8 @@ type Config struct {
 	SessionTTL          time.Duration
 	DatabaseURL         string
 	RedisURL            string
+	OTelEndpoint        string
+	OTelServiceName     string
 }
 
 func Load() *Config {
@@ -48,6 +50,8 @@ func Load() *Config {
 		SessionTTL:          getEnvDuration("SESSION_TTL", 30*24*time.Hour),
 		DatabaseURL:         getEnv("DATABASE_URL", "postgres://user:pass@localhost:5432/discord_bot"),
 		RedisURL:            getEnv("REDIS_URL", "redis://localhost:6379"),
+		OTelEndpoint:        os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		OTelServiceName:     getEnv("OTEL_SERVICE_NAME", "mixtape"),
 	}
 }
 

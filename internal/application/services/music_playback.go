@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"fiber_test/internal/application/ports"
+	"fiber_test/internal/infrastructure/logging"
 )
 
 // PlaybackQueue is the queue boundary used by playback. Keeping this
@@ -33,6 +34,8 @@ type MusicPlaybackService struct {
 	trackResolver TrackResolver
 	streamer      ports.AudioStreamer
 	idleTimeout   time.Duration
+	logger        *logging.Logger
+	metrics       ports.Metrics
 
 	mu      sync.Mutex
 	players map[string]*player
@@ -67,12 +70,17 @@ type player struct {
 const defaultIdleTimeout = 3 * time.Minute
 
 // NewMusicPlaybackService builds the playback service from its dependencies.
-func NewMusicPlaybackService(queue PlaybackQueue, trackResolver TrackResolver, streamer ports.AudioStreamer) *MusicPlaybackService {
+// Telemetry is an optional trailing option; without it the service logs to a
+// discard sink and emits no metrics.
+func NewMusicPlaybackService(queue PlaybackQueue, trackResolver TrackResolver, streamer ports.AudioStreamer, telem ...Telemetry) *MusicPlaybackService {
+	deps := resolveTelemetry(telem)
 	return &MusicPlaybackService{
 		queue:         queue,
 		trackResolver: trackResolver,
 		streamer:      streamer,
 		idleTimeout:   defaultIdleTimeout,
+		logger:        deps.logger,
+		metrics:       deps.metrics,
 		players:       make(map[string]*player),
 	}
 }
@@ -132,6 +140,8 @@ func (s *MusicPlaybackService) PlayWithCover(ctx context.Context, guildID, query
 }
 
 func (s *MusicPlaybackService) playWithCover(ctx context.Context, guildID, query, coverURL string) (*PlaybackResult, error) {
+	log := s.logger.With("guild_id", guildID)
+
 	s.mu.Lock()
 	p := s.player(guildID)
 	conn := p.conn
@@ -140,11 +150,16 @@ func (s *MusicPlaybackService) playWithCover(ctx context.Context, guildID, query
 	s.mu.Unlock()
 
 	if conn == nil {
-		return nil, errors.New("bot is not connected to a voice channel")
+		s.metrics.PlaybackFailure("not_connected")
+		err := errors.New("bot is not connected to a voice channel")
+		log.Error("play failed", "query", query, "error", err)
+		return nil, err
 	}
 
 	track, err := s.trackResolver.Resolve(ctx, query)
 	if err != nil {
+		s.metrics.PlaybackFailure("resolve")
+		log.Error("play failed", "query", query, "error", err)
 		return nil, err
 	}
 
@@ -156,6 +171,8 @@ func (s *MusicPlaybackService) playWithCover(ctx context.Context, guildID, query
 	}
 
 	if err := s.queue.AddToQueue(ctx, guildID, track); err != nil {
+		s.metrics.PlaybackFailure("queue")
+		log.Error("play failed adding to queue", "query", query, "track", track.Title, "error", err)
 		return nil, err
 	}
 
@@ -168,15 +185,20 @@ func (s *MusicPlaybackService) playWithCover(ctx context.Context, guildID, query
 	}
 	if queue != nil {
 		result.Position = len(queue.Tracks)
+		s.metrics.QueueDepth(guildID, len(queue.Tracks))
 	}
 
 	// Only kick off playback when the guild is idle.
 	if !playing {
 		if err := s.advance(ctx, guildID, 0); err != nil {
+			s.metrics.PlaybackFailure("stream")
+			log.Error("play failed starting stream", "track", track.Title, "url", track.URL, "error", err)
 			s.stop(guildID, p)
 			return nil, err
 		}
 	}
+	log.Info("requested track played", "query", query, "track", track.Title,
+		"started", result.Started, "position", result.Position)
 	return result, nil
 }
 
@@ -188,6 +210,7 @@ func (s *MusicPlaybackService) Skip(ctx context.Context, guildID string) error {
 		s.mu.Unlock()
 		return errors.New("nothing is playing")
 	}
+	skipping := p.current
 	// Bump the generation so any in-flight auto-advance goroutine for the
 	// current track considers itself stale and backs off.
 	p.gen++
@@ -200,8 +223,12 @@ func (s *MusicPlaybackService) Skip(ctx context.Context, guildID string) error {
 	p.playing = false
 	s.mu.Unlock()
 
+	s.logger.With("guild_id", guildID).Info("track skipped", "track", playerTrackTitle(skipping))
+
 	err := s.advance(ctx, guildID, 0)
 	if err != nil {
+		s.metrics.PlaybackFailure("stream")
+		s.logger.With("guild_id", guildID).Error("skip failed starting next track", "error", err)
 		s.stop(guildID, p)
 	}
 	return err
@@ -368,7 +395,10 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 		case <-advanceCtx.Done():
 			return
 		}
+		s.logger.With("guild_id", guildID).Info("track finished", "track", track.Title)
 		if err := s.advance(context.Background(), guildID, gen); err != nil {
+			s.metrics.PlaybackFailure("stream")
+			s.logger.With("guild_id", guildID).Error("auto-advance failed", "error", err)
 			s.stop(guildID, p)
 		}
 	}()
@@ -466,6 +496,15 @@ func (s *MusicPlaybackService) player(guildID string) *player {
 		s.players[guildID] = p
 	}
 	return p
+}
+
+// playerTrackTitle returns the track's title for logging, or an empty string
+// when the track is nil (e.g. nothing was playing).
+func playerTrackTitle(track *Track) string {
+	if track == nil {
+		return ""
+	}
+	return track.Title
 }
 
 // PlaybackResult describes the outcome of a Play call.
