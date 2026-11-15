@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  frontend-build:
+    name: Frontend build (bun)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Cache template/node_modules
+        uses: actions/cache@v4
+        with:
+          path: template/node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('template/bun.lock') }}
+
+      - name: Install dependencies and build frontend
+        run: |
+          cd template
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: template/build/
+
+  go-test:
+    name: Go test
+    runs-on: ubuntu-latest
+    needs: frontend-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.0
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: template/build/
+
+      - name: Run tests
+        run: |
+          go install github.com/jstemmer/go-junit-report/v2@v2.1.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          set +e
+          set -o pipefail
+          go test -json ./... | tee test-results.json
+          test_status=$?
+          go-junit-report -set-exit-code < test-results.json > test-results.xml
+          report_status=$?
+          if [ "$test_status" -ne 0 ]; then
+            exit "$test_status"
+          fi
+          exit "$report_status"
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml
+
+  secret-detection:
+    name: Secret detection (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker-image:
+    name: Docker image (buildx multiarch)
+    runs-on: ubuntu-latest
+    needs: [go-test, secret-detection]
+    if: github.ref == 'refs/heads/main' || github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine image tags
+        id: tags
+        run: |
+          tags="--tag ghcr.io/miyasakun/mixtape:${{ github.sha }}"
+          if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$GITHUB_REF_NAME" = "main" ]; then
+            tags="$tags --tag ghcr.io/miyasakun/mixtape:latest"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push multiarch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          provenance: false
+          sbom: false
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
