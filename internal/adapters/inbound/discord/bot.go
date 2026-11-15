@@ -2,6 +2,8 @@ package discord
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"fiber_test/internal/application/ports"
 	"fiber_test/internal/application/services"
@@ -14,6 +16,7 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
+	dgo "github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/thomas-vilte/dave-go/session"
 )
@@ -29,6 +32,7 @@ type Bot struct {
 	queue              *services.QueueService
 	guildConfig        *services.GuildConfigService
 	spotifyIntegration *services.SpotifyIntegrationService
+	selections         *SelectionStore
 }
 
 func NewBot(
@@ -67,10 +71,12 @@ func NewBot(
 		queue:              queue,
 		guildConfig:        guildConfig,
 		spotifyIntegration: spotifyIntegration,
+		selections:         NewSelectionStore(SelectionTTL + 5*time.Second),
 	}
 
 	client.AddEventListeners(
 		bot.NewListenerFunc(b.handleInteraction),
+		bot.NewListenerFunc(b.handleComponent),
 		bot.NewListenerFunc(b.handleGuildVoiceJoin),
 		bot.NewListenerFunc(b.handleGuildVoiceMove),
 		bot.NewListenerFunc(b.handleGuildVoiceLeave),
@@ -82,6 +88,11 @@ func NewBot(
 func (b *Bot) RegisterCommand(cmd Command) {
 	b.commands[cmd.Name()] = cmd
 	b.logger.Info("registered command", "name", cmd.Name())
+}
+
+// Selections exposes the pending Spotify selection store for command wiring.
+func (b *Bot) Selections() *SelectionStore {
+	return b.selections
 }
 
 func (b *Bot) RegisterCommands(cmds ...Command) {
@@ -163,6 +174,71 @@ func guildIDString(guildID *snowflake.ID) string {
 		return ""
 	}
 	return guildID.String()
+}
+
+// handleComponent routes component interactions. Everything goes to the
+// Spotify pick flow; unknown custom IDs are ignored. The nowplaying card is
+// purely visual and has no components to route.
+func (b *Bot) handleComponent(e *events.ComponentInteractionCreate) {
+	guildID, userID, requestID, index, ok := ParseSpotifyPickCustomID(e.Data.CustomID())
+	if !ok {
+		return
+	}
+
+	// Discord may omit GuildID in DMs; the flow is guild-only.
+	if e.GuildID() == nil || e.GuildID().String() != guildID {
+		b.ephemeralError(e, "❌ This selection is no longer valid")
+		return
+	}
+	if e.User().ID.String() != userID {
+		b.ephemeralError(e, "❌ Only the user who ran `/play` can pick a track")
+		return
+	}
+
+	candidates, coverURL, ok := b.selections.Take(requestID)
+	if !ok {
+		b.ephemeralError(e, "❌ This selection expired — use `/play` again")
+		return
+	}
+
+	if index < 0 || index >= len(candidates) {
+		b.ephemeralError(e, "❌ Invalid choice — use `/play` again")
+		return
+	}
+	chosen := candidates[index]
+
+	content := "⏳ Loading song..."
+	emptyComponents := []dgo.LayoutComponent{}
+	if err := e.UpdateMessage(discord.MessageUpdate{Content: &content, Components: &emptyComponents}); err != nil {
+		b.logger.Error("failed to update spotify pick message", "error", err)
+	}
+
+	// Playback involves yt-dlp and ffmpeg; do not block the event loop.
+	go func() {
+		var content string
+		result, err := b.musicPlayback.PlayWithCover(context.Background(), guildID, chosen.URL, coverURL)
+		if err != nil {
+			b.logger.Error("failed to play selected spotify track", "error", err)
+			content = "❌ Failed to play: " + err.Error()
+		} else {
+			content = fmt.Sprintf("🎵 Now playing: **%s**", result.Track.Title)
+		}
+		if _, err := b.client.Rest.UpdateInteractionResponse(b.client.ApplicationID, e.Token(), discord.MessageUpdate{Content: &content}); err != nil {
+			b.logger.Error("failed to report playback result", "error", err)
+		}
+	}()
+}
+
+// ephemeralError answers a component interaction with an ephemeral notice so
+// other users do not see it.
+func (b *Bot) ephemeralError(e *events.ComponentInteractionCreate, content string) {
+	err := e.CreateMessage(discord.MessageCreate{
+		Content: content,
+		Flags:   discord.MessageFlagEphemeral,
+	})
+	if err != nil {
+		b.logger.Error("failed to send ephemeral error", "error", err)
+	}
 }
 
 func (b *Bot) handleGuildVoiceJoin(e *events.GuildVoiceJoin) {

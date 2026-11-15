@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fiber_test/internal/domain"
@@ -45,6 +46,12 @@ type Spotify struct {
 	httpClient   *http.Client
 	accountsBase string
 	apiBase      string
+
+	// appToken caches a client-credentials access token for app-level API
+	// calls (e.g. track lookups that need no user consent).
+	appToken     string
+	appTokenExps time.Time
+	appTokenMu   sync.Mutex
 }
 
 func New(clientID, clientSecret, redirectURI string, opts ...Option) *Spotify {
@@ -165,6 +172,53 @@ func (s *Spotify) RefreshAccessToken(ctx context.Context, refreshToken string) (
 		RefreshToken: payload.RefreshToken,
 		Expiry:       time.Now().Add(time.Duration(payload.ExpiresIn) * time.Second),
 	}, nil
+}
+
+// GetTrack fetches a single track by its Spotify ID. It authenticates with a
+// client-credentials token (cached until close to expiry), so no user OAuth
+// connection is required for track lookups.
+func (s *Spotify) GetTrack(ctx context.Context, trackID string) (domain.PlaylistTrack, error) {
+	accessToken, err := s.appAccessToken(ctx)
+	if err != nil {
+		return domain.PlaylistTrack{}, err
+	}
+
+	var payload spotifyTrack
+	if err := s.get(ctx, accessToken, s.apiBase+"/tracks/"+url.PathEscape(trackID), nil, &payload); err != nil {
+		return domain.PlaylistTrack{}, err
+	}
+	return mapTrack(&payload), nil
+}
+
+// appAccessToken returns a valid client-credentials access token, fetching a
+// new one when none is cached or the cached one is about to expire.
+func (s *Spotify) appAccessToken(ctx context.Context) (string, error) {
+	s.appTokenMu.Lock()
+	defer s.appTokenMu.Unlock()
+
+	if s.appToken != "" && time.Now().Before(s.appTokenExps) {
+		return s.appToken, nil
+	}
+
+	body, err := s.postToken(ctx, url.Values{"grant_type": {"client_credentials"}})
+	if err != nil {
+		return "", err
+	}
+
+	var payload struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", fmt.Errorf("decode token response: %w", err)
+	}
+	if payload.AccessToken == "" {
+		return "", fmt.Errorf("spotify token exchange returned no access token")
+	}
+
+	s.appToken = payload.AccessToken
+	s.appTokenExps = time.Now().Add(time.Duration(payload.ExpiresIn)*time.Second - 30*time.Second)
+	return s.appToken, nil
 }
 
 // ListPlaylists returns a page of the user's followed and owned playlists.

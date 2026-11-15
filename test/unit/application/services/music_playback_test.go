@@ -95,6 +95,16 @@ func (c *fakeConn) SetFrameProvider(provider ports.FrameProvider) {
 	c.providers = append(c.providers, provider)
 }
 
+// lastProvider returns the most recently handed-off frame provider.
+func (c *fakeConn) lastProvider() ports.FrameProvider {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.providers) == 0 {
+		return nil
+	}
+	return c.providers[len(c.providers)-1]
+}
+
 func (c *fakeConn) Close(context.Context) {
 	c.mu.Lock()
 	c.closed = true
