@@ -116,13 +116,13 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Determine image tags
-        id: tags
-        run: |
-          tags="--tag ghcr.io/miyasakun/mixtape:${{ github.sha }}"
-          if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$GITHUB_REF_NAME" = "main" ]; then
-            tags="$tags --tag ghcr.io/miyasakun/mixtape:latest"
-          fi
-          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/miyasakun/mixtape
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push multiarch image
         uses: docker/build-push-action@v6
@@ -133,6 +133,7 @@ jobs:
           provenance: false
           sbom: false
           push: true
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
