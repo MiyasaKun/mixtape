@@ -281,6 +281,21 @@ type streamProvider struct {
 	pcmBytes [pcmFrameBytes]byte
 }
 
+// StreamProbe confirms that audio data is already flowing on r by reading
+// its first byte, and returns a reader that replays that byte followed by
+// the rest of the stream. Callers must consume the returned reader: using
+// r after a successful probe would silently drop the first byte, which
+// corrupts the WebM header ffmpeg parses. A probe error means no audio ever
+// arrived and the whole process chain should be retried.
+func StreamProbe(r io.Reader) (io.Reader, error) {
+	buffered := bufio.NewReader(r)
+	first, err := buffered.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	return io.MultiReader(bytes.NewReader([]byte{first}), buffered), nil
+}
+
 // newYTDLPStreamProvider starts the yt-dlp → ffmpeg process chain and
 // returns a provider feeding its PCM output.
 //
@@ -346,13 +361,16 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 	}
 
 	// Probe phase: wait until yt-dlp either produces its first byte of audio
-	// or exits with an error. The buffered reader is handed to the copy
-	// goroutine afterwards, so no data is lost.
-	reader := bufio.NewReader(ytdlpStdout)
-	firstByte := make(chan error, 1)
+	// or exits with an error. StreamProbe replays that byte so ffmpeg still
+	// receives the complete stream.
+	type probeResult struct {
+		stream io.Reader
+		err    error
+	}
+	firstByte := make(chan probeResult, 1)
 	go func() {
-		_, err := reader.ReadByte()
-		firstByte <- err
+		stream, err := StreamProbe(ytdlpStdout)
+		firstByte <- probeResult{stream: stream, err: err}
 	}()
 	ytdlpDone := make(chan error, 1)
 	go func() {
@@ -360,10 +378,13 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 	}()
 
 	var probeErr error
+	var audioStream io.Reader
 	select {
-	case probeErr = <-firstByte:
+	case result := <-firstByte:
+		probeErr = result.err
 		if probeErr == nil {
-			break // audio is flowing; hand the chain to the provider below.
+			audioStream = result.stream // audio is flowing; continue below.
+			break
 		}
 		// Reader error before any audio: treat like an exited process.
 		select {
@@ -391,7 +412,7 @@ func newYTDLPStreamProvider(ctx context.Context, url string) (ports.FrameProvide
 	// pipe when the download ends so ffmpeg sees EOF and exits cleanly.
 	go func() {
 		defer ffmpegStdin.Close()
-		_, _ = io.Copy(ffmpegStdin, reader)
+		_, _ = io.Copy(ffmpegStdin, audioStream)
 	}()
 
 	enc, err := gopus.NewEncoder(gopus.EncoderConfig{
