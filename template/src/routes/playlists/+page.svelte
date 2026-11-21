@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { m } from '../../paraglide/messages.js';
-	import { user } from '$lib/stores/auth.js';
-	import { getPlaylists } from '$lib/api/client.js';
-	import { createPagedResource, rememberPlaylists } from '$lib/stores/playlists.js';
-	import CoverArt from '$lib/components/CoverArt.svelte';
+	import { user } from '#lib/stores/auth.js';
+	import { getPlaylists } from '#lib/api/client.js';
+	import { createPagedResource, rememberPlaylists } from '#lib/stores/playlists.js';
+	import CoverArt from '#lib/components/CoverArt.svelte';
+import { trackCount } from '#lib/utils/plural.js';
+import { getLocale } from '../../paraglide/runtime.js';
 
 	const connected = $derived($user?.spotifyConnected ?? false);
 	const resource = createPagedResource((offset) => getPlaylists(offset, 50));
@@ -74,17 +76,28 @@
 			</div>
 		</section>
 	{:else if $resource.status === 'loading'}
-		<p class="text-base-content/70" aria-live="polite">{m.loading()}</p>
+		<ul class="grid gap-4" aria-hidden="true">
+			{#each Array(4) as _}
+				<li class="neu flex items-center gap-4 p-4">
+					<div class="neu-sm h-20 w-20 shrink-0 animate-pulse"></div>
+					<div class="min-w-0 flex-1 space-y-2">
+						<div class="h-5 w-1/2 animate-pulse rounded bg-black/10 dark:bg-white/10"></div>
+						<div class="h-4 w-1/3 animate-pulse rounded bg-black/[0.06] dark:bg-white/[0.06]"></div>
+					</div>
+				</li>
+			{/each}
+		</ul>
+		<p class="sr-only" aria-live="polite">{m.loading()}</p>
 	{:else if $resource.items.length === 0}
 		<section class="neu p-6">
 			<p class="text-base-content/70 text-pretty">{m.playlists_empty()}</p>
 		</section>
 	{:else}
-		<ul class="grid gap-4 sm:grid-cols-2">
-			<li>
+		<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+			<li class="min-w-0">
 				<a
 					href="/playlists/liked"
-					class="neu flex items-center gap-4 p-4 transition-transform touch-manipulation hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] motion-reduce:transform-none"
+					class="neu flex min-w-0 items-center gap-4 p-4 transition-transform touch-manipulation hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] motion-reduce:transform-none"
 				>
 					<span
 						class="neu-sm flex h-20 w-20 shrink-0 items-center justify-center text-[var(--neu-accent)]"
@@ -103,20 +116,18 @@
 				</a>
 			</li>
 			{#each $resource.items as playlist (playlist.id)}
-				<li>
+				<li class="min-w-0">
 					{#if playlist.browseable}
 						<a
 							href={`/playlists/${playlist.id}`}
-							class="neu flex items-center gap-4 p-4 transition-transform touch-manipulation hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] motion-reduce:transform-none"
+							class="neu flex min-w-0 items-center gap-4 p-4 transition-transform touch-manipulation hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] motion-reduce:transform-none"
 						>
 							<CoverArt src={playlist.imageUrl} name={playlist.name} />
 							<span class="min-w-0">
-								<span class="block truncate font-semibold">{playlist.name}</span>
-								<span class="block truncate text-sm text-base-content/70">{playlist.owner}</span>
+								<span class="block truncate font-semibold text-wrap-anywhere" title={playlist.name}>{playlist.name}</span>
+								<span class="block truncate text-sm text-base-content/70" title={playlist.owner}>{playlist.owner}</span>
 								{#if playlist.trackCount > 0}
-									<span class="block text-xs text-base-content/60"
-										>{m.playlists_track_count({ count: playlist.trackCount })}</span
-									>
+									<span class="block text-xs text-base-content/60">{trackCount(playlist.trackCount, getLocale())}</span>
 								{/if}
 							</span>
 						</a>
@@ -124,7 +135,7 @@
 						<div class="neu flex items-center gap-4 p-4 opacity-70">
 							<CoverArt src={playlist.imageUrl} name={playlist.name} />
 							<span class="min-w-0">
-								<span class="block truncate font-semibold">{playlist.name}</span>
+								<span class="block truncate font-semibold text-wrap-anywhere" title={playlist.name}>{playlist.name}</span>
 								<span class="block truncate text-sm text-base-content/70">{playlist.owner}</span>
 								<span class="block text-xs text-base-content/60">{m.playlists_not_browseable()}</span>
 							</span>

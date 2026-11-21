@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { m } from '../../paraglide/messages.js';
-	import { user, setSpotifyConnected } from '$lib/stores/auth.js';
-	import { getSpotifyAuthUrl, disconnectSpotify } from '$lib/api/client.js';
+	import { user, setSpotifyConnected } from '#lib/stores/auth.js';
+	import { getSpotifyAuthUrl, disconnectSpotify } from '#lib/api/client.js';
 
 	let busy = $state(false);
 	let error = $state('');

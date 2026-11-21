@@ -3,6 +3,8 @@ package domain
 import (
 	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // Sentinel errors shared across the auth domain.
@@ -52,6 +54,5 @@ type SpotifyConnection struct {
 	AccessToken        string
 	RefreshTokenCipher string
 	TokenExpiry        time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	gorm.Model
 }

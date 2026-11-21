@@ -23,9 +23,9 @@
 	const initial = $derived(name.trim().charAt(0).toUpperCase() || '♪');
 </script>
 
-<div class="{sizeClass} flex shrink-0 items-center justify-center overflow-hidden" aria-hidden="true">
+<div class="{sizeClass} relative flex shrink-0 items-center justify-center overflow-hidden rounded-[0.75rem] ring-1 ring-inset ring-black/[0.04] dark:ring-white/[0.06]" aria-hidden="true">
 	{#if showImage}
-		<img src={src} alt="" loading="lazy" class="h-full w-full object-cover" onerror={() => (failed = true)} />
+		<img src={src} alt="" loading="lazy" class="h-full w-full rounded-[inherit] object-cover" onerror={() => (failed = true)} />
 	{:else}
 		<span class="font-semibold text-[var(--neu-accent)]">{initial}</span>
 	{/if}

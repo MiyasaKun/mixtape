@@ -7,7 +7,8 @@
 
 **/node_modules
 **/.svelte-kit
-**/build
+# template/build/ is intentionally NOT ignored: it is embedded by //go:embed
+# all:build and must be part of the context (see Dockerfile note).
 **/dist
 
 Dockerfile*

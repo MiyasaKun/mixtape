@@ -1,21 +1,30 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap');
+/* Self-hosted faces: bundled into the build, served by the app itself. */
+@import '@fontsource-variable/inter';
+@import '@fontsource/archivo-black';
 @import "tailwindcss";
 @plugin "daisyui";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ————— Neumorphic tokens: one system drives everything ————— */
+/* daisyUI base colors are aliases, so `bg-base-*` cards can never drift
+   away from the neumorphic palette per theme. */
 @theme {
+	/* Light theme values (default) */
 	--color-neu-bg: #e0e5ec;
 	--color-neu-light: #ffffff;
 	--color-neu-dark: #a3b1c6;
 	--color-neu-accent: #6d5ef0;
 	--color-neu-text: #3a4157;
 
-	--color-neu-bg-dark: #1e2230;
-	--color-neu-light-dark: #2e3650;
-	--color-neu-dark-dark: #12151f;
-	--color-neu-accent-dark: #8b7cff;
-	--color-neu-text-dark: #e4e9f2;
+	/* Map daisyUI semantic slots onto the neumorphic system —
+	   light values live in the `:root` block after the plugin import,
+	   where they can't be shadowed by daisyUI's own theme CSS. */
+
+	/* Motion + type tokens */
+	--font-body: 'Inter Variable', system-ui, sans-serif;
+	--font-display: 'Archivo Black', sans-serif;
+	--ease-quick: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 :root {
@@ -34,13 +43,35 @@
 	--neu-text: #e4e9f2;
 }
 
-* {
-	font-family: 'Archivo Black', sans-serif;
-}
-
+/* ————— Typography: display face for headings, workhorse for UI ————— */
 body {
+	font-family: var(--font-body);
+	font-optical-sizing: auto;
 	background-color: var(--neu-bg);
 	color: var(--neu-text);
+	-webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3, h4, h5, h6,
+.card-title,
+.brandmark {
+	font-family: var(--font-display);
+	font-weight: 400; /* Archivo Black is inherently heavy */
+	letter-spacing: -0.01em;
+}
+
+h1, .card-title {
+	line-height: 1.1;
+}
+
+::selection {
+	background: var(--neu-accent);
+	color: #fff;
+}
+
+/* ————— Depth utilities (neumorphic) ————— */
+@utility text-wrap-anywhere {
+	overflow-wrap: anywhere;
 }
 
 @utility neu {
@@ -79,3 +110,81 @@ body {
 		-12px -12px 24px var(--neu-light);
 }
 
+/* ————— Motion: press feedback, one budget ————— */
+/* Buttons acknowledge the press instantly and stay interruptible. */
+@media (hover: hover) and (pointer: fine) {
+	.btn:not([disabled]):hover {
+		transform: translateY(-1px);
+	}
+}
+
+.btn {
+	transition: transform 160ms var(--ease-quick), box-shadow 160ms var(--ease-quick);
+}
+
+.btn:not([disabled]):active {
+	transform: scale(0.97) translateY(0);
+}
+
+button:disabled,
+.btn[disabled] {
+	transform: none;
+}
+
+/* Land on the page without moving anything else. */
+@keyframes neu-rise {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.rise {
+	animation: neu-rise 300ms var(--ease-quick) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.rise {
+		animation: none;
+	}
+}
+
+.btn,
+a {
+	transition-property: transform, background-color, color, opacity;
+	transition-duration: 160ms;
+	transition-timing-function: var(--ease-quick);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.btn,
+	a {
+		transition-duration: 0s;
+	}
+}
+
+/* ————— daisyUI light values, overriding the plugin's own :root ————— */
+:root {
+	--color-base-100: #eaeef4; /* raised surfaces (cards) */
+	--color-base-200: #e0e5ec; /* page ground */
+	--color-base-300: #d4dae4; /* pressed / deeper ground */
+	--color-base-content: #2d3348;
+	--color-primary: #6d5ef0;
+	--color-primary-content: #ffffff;
+	--color-error: #d95c5c;
+}
+
+/* Dark values must come after the :root aliases above or they lose the
+   cascade (same specificity, later wins). */
+.dark {
+	--color-base-100: #272d3f;
+	--color-base-200: #1e2230;
+	--color-base-300: #161a26;
+	--color-base-content: #e4e9f2;
+	--color-primary: #8b7cff;
+	--color-error: #e07a7a;
+}

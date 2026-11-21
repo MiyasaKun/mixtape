@@ -2,9 +2,9 @@
 	import { goto } from '$app/navigation';
 	import { m } from '../../paraglide/messages.js';
 	import { setLocale, getLocale } from '../../paraglide/runtime.js';
-	import { signOut } from '$lib/stores/auth.js';
-	import { theme, toggleTheme } from '$lib/stores/theme.js';
-	import type { AuthUser } from '$lib/api/schemas.js';
+	import { signOut } from '#lib/stores/auth.js';
+	import { theme, toggleTheme } from '#lib/stores/theme.js';
+	import type { AuthUser } from '#lib/api/schemas.js';
 
 	let { user }: { user: AuthUser | null } = $props();
 

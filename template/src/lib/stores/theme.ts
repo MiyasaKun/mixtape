@@ -8,6 +8,11 @@ const STORAGE_KEY = 'mixtape-theme';
 /** Current theme: 'light' or 'dark'. */
 export const theme: Writable<Theme> = writable('light');
 
+/** Uses the saved choice when it names a real theme, else the system preference. */
+export function resolveTheme(saved: string | null, prefersDark: boolean): Theme {
+	return saved === 'dark' || saved === 'light' ? saved : prefersDark ? 'dark' : 'light';
+}
+
 /** Reads the saved or system theme and applies it. */
 export function initTheme(): Theme {
 	let saved: string | null = null;
@@ -18,7 +23,7 @@ export function initTheme(): Theme {
 	}
 
 	const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-	const value: Theme = saved === 'dark' || saved === 'light' ? saved : prefersDark ? 'dark' : 'light';
+	const value = resolveTheme(saved, prefersDark);
 
 	apply(value);
 	return value;

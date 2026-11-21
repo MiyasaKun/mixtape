@@ -141,7 +141,7 @@
 			</button>
 			<button
 				type="button"
-				onclick={() => setConfirmDelete(true)}
+				onclick={() => (confirmDelete = true)}
 				class="touch-manipulation rounded-xl border-2 border-red-500/60 px-5 py-2.5 font-semibold text-red-600 transition-colors duration-150 hover:bg-red-500 hover:text-white focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:text-red-300"
 			>
 				Delete Queue…
@@ -160,7 +160,7 @@
 					<button
 						type="button"
 						onclick={() => {
-							setConfirmDelete(false);
+							confirmDelete = false;
 							showToast('Queue cleared. Undo available.');
 						}}
 						class="touch-manipulation rounded-xl bg-red-500 px-4 py-2 font-semibold text-white transition-colors duration-150 hover:bg-red-600 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
@@ -169,7 +169,7 @@
 					</button>
 					<button
 						type="button"
-						onclick={() => setConfirmDelete(false)}
+						onclick={() => (confirmDelete = false)}
 						class="neu-sm touch-manipulation px-4 py-2 transition-colors duration-150 hover:brightness-105 focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] focus-visible:ring-offset-2"
 					>
 						Keep Music

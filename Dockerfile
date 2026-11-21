@@ -1,20 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
-ARG BUN_VERSION=1.3.14
 ARG GO_VERSION=1.27.0
 ARG GO_ALPINE_VERSION=3.24
 ARG ALPINE_VERSION=3.24.0
 
-FROM oven/bun:${BUN_VERSION}-alpine AS frontend-deps
-WORKDIR /src/template
-
-COPY template/package.json template/bun.lock ./
-RUN bun install --frozen-lockfile
-
-FROM frontend-deps AS frontend-builder
-COPY template ./
-RUN bun run build
-
+# NOTE: template/build/ must exist in the build context (CI downloads the
+# frontend-build artifact there; locally run `cd template && bun run build`
+# first — the same prerequisite as `go build`, which embeds it via
+# template/template.go's //go:embed all:build).
 FROM golang:${GO_VERSION}-alpine${GO_ALPINE_VERSION} AS backend-deps
 WORKDIR /src
 
@@ -26,12 +19,8 @@ ARG TARGETOS
 ARG TARGETARCH
 
 COPY . .
-COPY --from=frontend-builder /src/template/build ./template/build
 RUN CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -trimpath -ldflags="-s -w" -o /out/mixtape .
-
-FROM backend-builder AS backend-test
-RUN go test ./...
 
 FROM alpine:${ALPINE_VERSION} AS runner
 WORKDIR /app
@@ -41,8 +30,8 @@ RUN apk add --no-cache ca-certificates ffmpeg yt-dlp
 ENV NODE_ENV=production
 ENV PORT=:3000
 
-COPY --from=backend-test --chown=nobody:nobody /out/mixtape ./mixtape
-COPY --from=backend-test --chown=nobody:nobody /src/docs ./docs
+COPY --from=backend-builder --chown=nobody:nobody /out/mixtape ./mixtape
+COPY --from=backend-builder --chown=nobody:nobody /src/docs ./docs
 # config.Load expects a dotenv file; runtime environment variables override it.
 COPY --chown=nobody:nobody .env.example .env
 

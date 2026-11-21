@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { m } from '../../paraglide/messages.js';
-	import { signInWithGoogle } from '$lib/stores/auth.js';
+	import { signInWithGoogle } from '#lib/stores/auth.js';
 
 	let busy = $state(false);
 	let error = $state('');
+	let errorEl = $state<HTMLDivElement>();
 
 	async function handleSignIn() {
 		busy = true;
@@ -13,6 +14,7 @@
 		} catch {
 			error = m.sign_in_error();
 			busy = false;
+			await Promise.resolve().then(() => errorEl?.focus());
 		}
 	}
 </script>
@@ -58,7 +60,30 @@
 			</button>
 
 			{#if error}
-				<p class="text-error mt-3" role="alert" aria-live="polite">{error}</p>
+				<div
+					bind:this={errorEl}
+					role="alert"
+					aria-live="polite"
+					tabindex="-1"
+					class="mt-4 flex w-full items-start gap-2 rounded-xl border border-black/[0.08] bg-error/10 p-3 text-sm text-error focus:outline-none"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke-width="2"
+						stroke="currentColor"
+						class="mt-0.5 h-4 w-4 shrink-0"
+						aria-hidden="true"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+						/>
+					</svg>
+					<span>{error}</span>
+				</div>
 			{/if}
 		</div>
 	</div>

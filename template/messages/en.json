@@ -51,6 +51,8 @@
   "playlists_empty": "No playlists yet. Follow a playlist on Spotify and it will show up here.",
   "playlists_back": "All playlists",
   "playlists_track_count": "{count} tracks",
+  "playlists_track_count_one": "{count} track",
+  "playlists_track_count_other": "{count} tracks",
   "playlists_loaded_status": "{count} loaded",
   "playlists_load_more": "Load more",
   "playlists_loading_more": "Loading more…",
@@ -65,5 +67,13 @@
   "playlists_forbidden": "This playlist can’t be browsed here. Spotify only lets an app read playlists you own or collaborate on.",
   "playlists_not_found": "This playlist couldn’t be found. It may have been removed or made private.",
   "playlists_rate_limited": "Spotify is rate limiting requests. Please wait a moment and try again.",
-  "playlists_not_browseable": "Not available to browse"
+  "playlists_not_browseable": "Not available to browse",
+  "home_intro": "Browse your Spotify library and feed your Discord music queue from one place.",
+  "home_browse_playlists": "Browse playlists",
+  "home_connect_to_continue": "Connect Spotify to browse your library.",
+  "home_signed_in_as": "Signed in as {name}",
+  "dashboard_status_heading": "Connection status",
+  "dashboard_ready": "Everything is connected. Your library is ready to browse.",
+  "dashboard_action_playlists": "Browse Playlists",
+  "dashboard_action_settings": "Manage connection"
 }

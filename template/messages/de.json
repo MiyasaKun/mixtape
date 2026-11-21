@@ -51,6 +51,8 @@
   "playlists_empty": "Noch keine Playlists. Folge einer Playlist auf Spotify, dann erscheint sie hier.",
   "playlists_back": "Alle Playlists",
   "playlists_track_count": "{count} Titel",
+  "playlists_track_count_one": "{count} Titel",
+  "playlists_track_count_other": "{count} Titel",
   "playlists_loaded_status": "{count} geladen",
   "playlists_load_more": "Mehr laden",
   "playlists_loading_more": "Wird geladen…",
@@ -65,5 +67,13 @@
   "playlists_forbidden": "Diese Playlist kann hier nicht durchsucht werden. Spotify erlaubt Apps nur, Playlists zu lesen, die du besitzt oder an denen du mitarbeitest.",
   "playlists_not_found": "Diese Playlist wurde nicht gefunden. Sie wurde möglicherweise entfernt oder ist privat.",
   "playlists_rate_limited": "Spotify begrenzt gerade die Anfragen. Bitte warte einen Moment und versuche es erneut.",
-  "playlists_not_browseable": "Nicht durchsuchbar"
+  "playlists_not_browseable": "Nicht durchsuchbar",
+  "home_intro": "Durchsuche deine Spotify-Mediathek und fülle deine Discord-Musikwarteschlange – an einem Ort.",
+  "home_browse_playlists": "Playlists durchsuchen",
+  "home_connect_to_continue": "Verbinde Spotify, um deine Mediathek zu durchsuchen.",
+  "home_signed_in_as": "Angemeldet als {name}",
+  "dashboard_status_heading": "Verbindungsstatus",
+  "dashboard_ready": "Alles ist verbunden. Deine Mediathek ist bereit zum Durchsuchen.",
+  "dashboard_action_playlists": "Playlists durchsuchen",
+  "dashboard_action_settings": "Verbindung verwalten"
 }

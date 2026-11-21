@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { m } from '../../../paraglide/messages.js';
-	import { user } from '$lib/stores/auth.js';
-	import { getLikedTracks, getPlaylistTracks } from '$lib/api/client.js';
-	import { cachedPlaylist, createPagedResource } from '$lib/stores/playlists.js';
-	import CoverArt from '$lib/components/CoverArt.svelte';
+	import { user } from '#lib/stores/auth.js';
+	import { getLikedTracks, getPlaylistTracks } from '#lib/api/client.js';
+	import { cachedPlaylist, createPagedResource } from '#lib/stores/playlists.js';
+	import CoverArt from '#lib/components/CoverArt.svelte';
 
 	const id = $derived(page.params.id ?? '');
 	const isLiked = $derived(id === 'liked');
