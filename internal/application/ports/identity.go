@@ -15,6 +15,8 @@ type UserRepository interface {
 	UpsertByGoogleID(ctx context.Context, profile domain.GoogleProfile) (domain.User, error)
 	// ByID looks an account up by its internal ID.
 	ByID(ctx context.Context, id string) (domain.User, error)
+	// UpdateSpotifyAutoplay stores whether Spotify links should autoplay.
+	UpdateSpotifyAutoplay(ctx context.Context, id string, enabled bool) error
 }
 
 // SessionRepository manages sign-in sessions in PostgreSQL.

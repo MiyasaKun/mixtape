@@ -3,6 +3,8 @@ package discord
 import (
 	"context"
 	"fmt"
+	"iter"
+	"sort"
 	"time"
 
 	"fiber_test/internal/application/ports"
@@ -13,10 +15,10 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
+	dgo "github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
-	dgo "github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/thomas-vilte/dave-go/session"
 )
@@ -95,6 +97,37 @@ func (b *Bot) Selections() *SelectionStore {
 	return b.selections
 }
 
+// ActiveVoiceGuilds lists guilds with an open voice connection. Connections
+// that were created but never opened (no channel yet) are not playable and
+// are excluded so the web UI only offers real playback targets.
+func (b *Bot) ActiveVoiceGuilds() []ports.VoiceGuild {
+	return ActiveVoiceGuilds(b.client.VoiceManager.Conns(), b.guildNameByID)
+}
+
+// ActiveVoiceGuilds maps open voice connections to their guilds. guildName
+// resolves a display name and reports false when the guild is unknown.
+func ActiveVoiceGuilds(conns iter.Seq[voice.Conn], guildName func(snowflake.ID) (string, bool)) []ports.VoiceGuild {
+	guilds := make([]ports.VoiceGuild, 0)
+	for conn := range conns {
+		if conn.ChannelID() == nil {
+			continue
+		}
+		guildID := conn.GuildID()
+		name := ""
+		if resolved, ok := guildName(guildID); ok {
+			name = resolved
+		}
+		guilds = append(guilds, ports.VoiceGuild{ID: guildID.String(), Name: name})
+	}
+	sort.Slice(guilds, func(i, j int) bool {
+		if guilds[i].Name == guilds[j].Name {
+			return guilds[i].ID < guilds[j].ID
+		}
+		return guilds[i].Name < guilds[j].Name
+	})
+	return guilds
+}
+
 func (b *Bot) RegisterCommands(cmds ...Command) {
 	for _, cmd := range cmds {
 		b.RegisterCommand(cmd)
@@ -137,7 +170,9 @@ func (b *Bot) handleInteraction(e *events.ApplicationCommandInteractionCreate) {
 	log := b.logger.With(
 		"command", cmdName,
 		"guild_id", guildIDString(e.GuildID()),
+		"guild_name", b.guildName(e.GuildID()),
 		"user_id", e.User().ID.String(),
+		"user_name", e.User().EffectiveName(),
 	)
 
 	cmd, exists := b.commands[cmdName]
@@ -174,6 +209,30 @@ func guildIDString(guildID *snowflake.ID) string {
 		return ""
 	}
 	return guildID.String()
+}
+
+// guildNameByID resolves a guild display name from the cache, reporting
+// whether the guild is known.
+func (b *Bot) guildNameByID(guildID snowflake.ID) (string, bool) {
+	guild, ok := b.client.Caches.Guild(guildID)
+	if !ok {
+		return "", false
+	}
+	return guild.Name, true
+}
+
+// guildName resolves the guild's display name from the cache. It returns an
+// empty string for DM interactions or cache misses so logging never adds a
+// REST round-trip.
+func (b *Bot) guildName(guildID *snowflake.ID) string {
+	if guildID == nil {
+		return ""
+	}
+	guild, ok := b.client.Caches.Guild(*guildID)
+	if !ok {
+		return ""
+	}
+	return guild.Name
 }
 
 // handleComponent routes component interactions. Everything goes to the

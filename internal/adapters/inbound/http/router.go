@@ -3,6 +3,7 @@ package http
 import (
 	"fiber_test/internal/adapters/inbound/http/handlers"
 	"fiber_test/internal/adapters/inbound/http/middleware"
+	"fiber_test/internal/application/ports"
 	"fiber_test/internal/application/services"
 	"fiber_test/internal/infrastructure/config"
 	"fiber_test/internal/infrastructure/logging"
@@ -29,6 +30,8 @@ func NewRouter(
 	queue *services.QueueService,
 	guildConfig *services.GuildConfigService,
 	spotifyIntegration *services.SpotifyIntegrationService,
+	webPlayback *services.WebPlaybackService,
+	voiceGuilds ports.VoiceGuildLister,
 	authService *services.AuthService,
 	staticFS fs.FS,
 ) *Router {
@@ -77,6 +80,7 @@ func NewRouter(
 	authGroup.Get("/spotify/callback", middleware.RequireAuth(authService), auth.SpotifyCallback)
 	authGroup.Delete("/spotify", middleware.RequireAuth(authService), auth.SpotifyDisconnect)
 	authGroup.Get("/me", middleware.RequireAuth(authService), auth.Me)
+	authGroup.Put("/me/preferences", middleware.RequireAuth(authService), auth.UpdatePreferences)
 	authGroup.Post("/logout", auth.Logout)
 
 	playlists := handlers.NewPlaylistHandler(spotifyIntegration)
@@ -84,6 +88,11 @@ func NewRouter(
 	spotifyGroup.Get("/playlists", playlists.ListPlaylists)
 	spotifyGroup.Get("/playlists/:id/tracks", playlists.ListPlaylistTracks)
 	spotifyGroup.Get("/liked", playlists.ListLikedTracks)
+
+	playback := handlers.NewPlaybackHandler(webPlayback, voiceGuilds)
+	guilds := api.Group("/guilds", middleware.RequireAuth(authService))
+	guilds.Get("/active", playback.ActiveGuilds)
+	guilds.Post("/:guildId/playback/play", playback.PlaySpotify)
 
 	app.Use(static.New("/", static.Config{
 		FS:              staticFS,

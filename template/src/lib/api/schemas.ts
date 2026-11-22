@@ -13,7 +13,8 @@ export const authUserSchema = z.object({
 	name: z.string(),
 	picture: z.string(),
 	locale: z.string(),
-	spotifyConnected: z.boolean()
+	spotifyConnected: z.boolean(),
+	spotifyAutoplay: z.boolean()
 });
 
 export type AuthUser = z.infer<typeof authUserSchema>;
@@ -76,3 +77,28 @@ export const playlistTrackPageSchema = z.object({
 });
 
 export type PlaylistTrackPage = z.infer<typeof playlistTrackPageSchema>;
+
+/** A guild where the bot currently has an active voice connection. */
+export const activeGuildSchema = z.object({
+	id: z.string(),
+	name: z.string()
+});
+
+export type ActiveGuild = z.infer<typeof activeGuildSchema>;
+
+/** The active voice guilds (`GET /api/guilds/active`). */
+export const activeGuildsSchema = z.object({
+	guilds: z.array(activeGuildSchema)
+});
+
+export type ActiveGuilds = z.infer<typeof activeGuildsSchema>;
+
+/** The result of sending a Spotify track to a guild's queue. */
+export const playSpotifyResultSchema = z.object({
+	status: z.literal('ok'),
+	title: z.string(),
+	started: z.boolean(),
+	position: z.number().int().positive()
+});
+
+export type PlaySpotifyResult = z.infer<typeof playSpotifyResultSchema>;

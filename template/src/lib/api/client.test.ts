@@ -16,7 +16,8 @@ const validUser = {
 	name: 'Ada Lovelace',
 	picture: 'https://example.com/ada.png',
 	locale: 'en',
-	spotifyConnected: false
+	spotifyConnected: false,
+	spotifyAutoplay: false
 };
 
 function jsonResponse(body: unknown, status = 200) {

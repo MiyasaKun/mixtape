@@ -49,11 +49,14 @@ type fakeSpotifyProvider struct {
 	refreshCalls  int
 
 	playlists      domain.PlaylistPage
+	playlistPages  map[int]domain.PlaylistPage
+	playlistFn     func(offset int) (domain.PlaylistPage, error)
 	liked          domain.TrackPage
 	tracks         domain.TrackPage
 	listErr        error
 	gotListToken   string
 	gotListUserID  string
+	gotListOffset  int
 	gotLikedToken  string
 	gotTracksToken string
 	gotPlaylistID  string
@@ -77,6 +80,13 @@ func (f *fakeSpotifyProvider) RefreshAccessToken(ctx context.Context, refreshTok
 func (f *fakeSpotifyProvider) ListPlaylists(ctx context.Context, accessToken, spotifyUserID string, offset, limit int) (domain.PlaylistPage, error) {
 	f.gotListToken = accessToken
 	f.gotListUserID = spotifyUserID
+	f.gotListOffset = offset
+	if f.playlistPages != nil {
+		return f.playlistPages[offset], f.listErr
+	}
+	if f.playlistFn != nil {
+		return f.playlistFn(offset)
+	}
 	return f.playlists, f.listErr
 }
 

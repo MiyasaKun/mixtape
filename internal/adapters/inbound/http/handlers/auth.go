@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"time"
 
 	"fiber_test/internal/application/services"
@@ -78,6 +79,30 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
+	return c.JSON(userResponse(user))
+}
+
+type updatePreferencesRequest struct {
+	SpotifyAutoplay *bool `json:"spotifyAutoplay"`
+}
+
+// UpdatePreferences updates the signed-in account's web preferences.
+func (h *AuthHandler) UpdatePreferences(c fiber.Ctx) error {
+	user, ok := c.Locals(UserLocalsKey).(domain.User)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body updatePreferencesRequest
+	if err := json.Unmarshal(c.Body(), &body); err != nil || body.SpotifyAutoplay == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid_request"})
+	}
+
+	if err := h.auth.SetSpotifyAutoplay(c.Context(), user.ID, *body.SpotifyAutoplay); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "update_failed"})
+	}
+
+	user.SpotifyAutoplay = *body.SpotifyAutoplay
 	return c.JSON(userResponse(user))
 }
 
@@ -180,5 +205,6 @@ func userResponse(u domain.User) fiber.Map {
 		"picture":          u.Picture,
 		"locale":           u.Locale,
 		"spotifyConnected": u.SpotifyConnected,
+		"spotifyAutoplay":  u.SpotifyAutoplay,
 	}
 }

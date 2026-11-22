@@ -11,6 +11,10 @@ import (
 	"fiber_test/internal/infrastructure/logging"
 )
 
+// ErrVoiceNotConnected is returned when playback needs a guild's voice
+// connection but the bot is not currently connected to one.
+var ErrVoiceNotConnected = errors.New("bot is not connected to a voice channel")
+
 // PlaybackQueue is the queue boundary used by playback. Keeping this
 // interface at the application boundary lets playback work with the real
 // Redis-backed queue or an in-memory test double.
@@ -151,7 +155,7 @@ func (s *MusicPlaybackService) playWithCover(ctx context.Context, guildID, query
 
 	if conn == nil {
 		s.metrics.PlaybackFailure("not_connected")
-		err := errors.New("bot is not connected to a voice channel")
+		err := ErrVoiceNotConnected
 		log.Error("play failed", "query", query, "error", err)
 		return nil, err
 	}
@@ -380,7 +384,7 @@ func (s *MusicPlaybackService) advance(ctx context.Context, guildID string, expe
 
 	if conn == nil {
 		provider.Close()
-		return errors.New("bot is not connected to a voice channel")
+		return ErrVoiceNotConnected
 	}
 
 	// Hand the provider to the voice connection; disgo starts pulling frames.

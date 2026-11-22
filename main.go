@@ -101,18 +101,7 @@ func main() {
 	musicPlayback := services.NewMusicPlaybackService(queueService, trackResolver, youtubeClient, telemetryDep)
 	guildConfigService := services.NewGuildConfigService(db)
 	spotifyIntegration := services.NewSpotifyIntegrationService(spotifyClient, spotifyConnections, encryptor, time.Now)
-
-	httpRouter := http.NewRouter(
-		cfg,
-		logger,
-		telemetry.HTTPMetrics(),
-		musicPlayback,
-		queueService,
-		guildConfigService,
-		spotifyIntegration,
-		authService,
-		template.Dist(),
-	)
+	webPlayback := services.NewWebPlaybackService(trackResolver, musicPlayback)
 
 	discordBot := discord.NewBot(
 		cfg.DiscordBotToken,
@@ -122,6 +111,20 @@ func main() {
 		queueService,
 		guildConfigService,
 		spotifyIntegration,
+	)
+
+	httpRouter := http.NewRouter(
+		cfg,
+		logger,
+		telemetry.HTTPMetrics(),
+		musicPlayback,
+		queueService,
+		guildConfigService,
+		spotifyIntegration,
+		webPlayback,
+		discordBot,
+		authService,
+		template.Dist(),
 	)
 
 	discordBot.RegisterCommands(

@@ -6,14 +6,17 @@ import "time"
 // domain types and never leave this package.
 
 type userModel struct {
-	ID        string    `gorm:"column:id;type:uuid;primaryKey"`
-	GoogleID  string    `gorm:"column:google_id;uniqueIndex;not null"`
-	Email     string    `gorm:"column:email;not null"`
-	Name      string    `gorm:"column:name;not null;default:''"`
-	Picture   string    `gorm:"column:picture;not null;default:''"`
-	Locale    string    `gorm:"column:locale;type:varchar(10);not null;default:'en'"`
-	CreatedAt time.Time `gorm:"column:created_at;not null;autoCreateTime"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+	ID       string `gorm:"column:id;type:uuid;primaryKey"`
+	GoogleID string `gorm:"column:google_id;uniqueIndex;not null"`
+	Email    string `gorm:"column:email;not null"`
+	Name     string `gorm:"column:name;not null;default:''"`
+	Picture  string `gorm:"column:picture;not null;default:''"`
+	Locale   string `gorm:"column:locale;type:varchar(10);not null;default:'en'"`
+	// SpotifyAutoplay is an account-level web preference: when true, “Open in
+	// Spotify” links request autoplay.
+	SpotifyAutoplay bool      `gorm:"column:spotify_autoplay;not null;default:false"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
 
 	Connection *spotifyConnectionModel `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
 }

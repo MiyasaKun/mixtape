@@ -35,6 +35,17 @@ func (s *stubUsers) UpsertByGoogleID(ctx context.Context, profile domain.GoogleP
 	return u, nil
 }
 
+func (s *stubUsers) UpdateSpotifyAutoplay(ctx context.Context, id string, enabled bool) error {
+	u, ok := s.byID[id]
+	if !ok {
+		return domain.ErrUserNotFound
+	}
+	u.SpotifyAutoplay = enabled
+	s.byID[id] = u
+	s.byGoogle[u.GoogleID] = u
+	return nil
+}
+
 func (s *stubUsers) ByID(ctx context.Context, id string) (domain.User, error) {
 	u, ok := s.byID[id]
 	if !ok {

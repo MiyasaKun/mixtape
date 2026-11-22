@@ -69,6 +69,32 @@
         }
       }
     },
+    "/api/guilds/active": {
+      "get": {
+        "tags": ["playback"],
+        "summary": "List guilds with an active voice connection",
+        "description": "Returns only the guilds where the bot is currently connected to a voice channel. These are the valid targets for web-initiated playback.",
+        "operationId": "listActiveGuilds",
+        "responses": {
+          "200": {
+            "description": "Active voice guilds",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ActiveGuildsResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/guilds/{guildId}/queue": {
       "get": {
         "tags": ["queue"],
@@ -263,9 +289,9 @@
     "/api/guilds/{guildId}/playback/play": {
       "post": {
         "tags": ["playback"],
-        "summary": "Play or resume",
-        "description": "Starts or resumes playback. Optionally provide a URL or query to play.",
-        "operationId": "play",
+        "summary": "Play a Spotify track from the web",
+        "description": "Resolves a Spotify track link to its best YouTube match, adds it to the guild's queue and starts playback when the guild is idle. The guild must currently have an active voice connection.",
+        "operationId": "playWebSpotify",
         "parameters": [
           {
             "name": "guildId",
@@ -278,7 +304,7 @@
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -289,11 +315,11 @@
         },
         "responses": {
           "200": {
-            "description": "Playback started",
+            "description": "Track queued or playing",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PlaybackStateResponse"
+                  "$ref": "#/components/schemas/PlaySpotifyResponse"
                 }
               }
             }
@@ -302,9 +328,39 @@
             "description": "Invalid request",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "409": {
+            "description": "Bot is not connected to a voice channel in this guild",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "422": {
+            "description": "No playable YouTube match was found",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          },
+          "502": {
+            "description": "Playback failed upstream",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
               }
             }
           }
@@ -722,6 +778,48 @@
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/AuthUser"}
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me/preferences": {
+      "put": {
+        "tags": ["auth"],
+        "summary": "Update web preferences",
+        "description": "Updates the signed-in account's web preferences, such as whether Open in Spotify links request autoplay",
+        "operationId": "updatePreferences",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/UpdatePreferencesRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated account",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AuthUser"}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/ErrorResponse"}
               }
             }
           },
@@ -1239,6 +1337,16 @@
           }
         }
       },
+      "PlaySpotifyResponse": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["ok"]},
+          "title": {"type": "string", "description": "Resolved track title"},
+          "started": {"type": "boolean", "description": "Whether playback started immediately"},
+          "position": {"type": "integer", "description": "1-based queue position"}
+        },
+        "required": ["status", "title", "started", "position"]
+      },
       "SeekRequest": {
         "type": "object",
         "properties": {
@@ -1397,8 +1505,39 @@
           "name": {"type": "string"},
           "picture": {"type": "string", "description": "Google profile picture URL"},
           "locale": {"type": "string"},
-          "spotifyConnected": {"type": "boolean"}
+          "spotifyConnected": {"type": "boolean"},
+          "spotifyAutoplay": {
+            "type": "boolean",
+            "description": "Whether Open in Spotify links request autoplay"
+          }
         }
+      },
+      "ActiveGuild": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "description": "Discord guild ID"},
+          "name": {"type": "string", "description": "Discord guild name"}
+        },
+        "required": ["id", "name"]
+      },
+      "ActiveGuildsResponse": {
+        "type": "object",
+        "properties": {
+          "guilds": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ActiveGuild"}
+          }
+        }
+      },
+      "UpdatePreferencesRequest": {
+        "type": "object",
+        "properties": {
+          "spotifyAutoplay": {
+            "type": "boolean",
+            "description": "Whether Open in Spotify links request autoplay"
+          }
+        },
+        "required": ["spotifyAutoplay"]
       },
       "SearchRequest": {
         "type": "object",

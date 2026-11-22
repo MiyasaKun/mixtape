@@ -4,11 +4,32 @@ import {
 	authUrlSchema,
 	okSchema,
 	playlistPageSchema,
-	playlistTrackPageSchema
+	playlistTrackPageSchema,
+	activeGuildsSchema,
+	playSpotifyResultSchema
 } from './schemas.js';
-import type { AuthUser, AuthUrl, Ok, PlaylistPage, PlaylistTrackPage } from './schemas.js';
+import type {
+	AuthUser,
+	AuthUrl,
+	Ok,
+	PlaylistPage,
+	PlaylistTrackPage,
+	ActiveGuilds,
+	PlaySpotifyResult
+} from './schemas.js';
 
-export type { AuthUser, AuthUrl, Ok, Playlist, PlaylistTrack, PlaylistPage, PlaylistTrackPage } from './schemas.js';
+export type {
+	AuthUser,
+	AuthUrl,
+	Ok,
+	Playlist,
+	PlaylistTrack,
+	PlaylistPage,
+	PlaylistTrackPage,
+	ActiveGuild,
+	ActiveGuilds,
+	PlaySpotifyResult
+} from './schemas.js';
 
 /**
  * Typed fetch wrapper for the Mixtape `/api/*` backend. All requests send the
@@ -139,4 +160,28 @@ export function getPlaylistTracks(id: string, offset = 0, limit = 100): Promise<
 /** Returns a page of the signed-in user's Liked Songs. */
 export function getLikedTracks(offset = 0, limit = 100): Promise<PlaylistTrackPage> {
 	return request(`/spotify/liked?offset=${offset}&limit=${limit}`, playlistTrackPageSchema);
+}
+
+/** Returns the guilds where the bot currently has an active voice connection. */
+export function getActiveVoiceGuilds(): Promise<ActiveGuilds> {
+	return request('/guilds/active', activeGuildsSchema);
+}
+
+/** Sends a Spotify track to the chosen guild's queue and starts it when idle. */
+export function queueSpotifyTrack(guildId: string, url: string): Promise<PlaySpotifyResult> {
+	const encoded = encodeURIComponent(guildId);
+	return request(`/guilds/${encoded}/playback/play`, playSpotifyResultSchema, {
+		method: 'POST',
+		body: { url },
+		bodySchema: z.object({ url: z.string().min(1) })
+	});
+}
+
+/** Updates whether "Open in Spotify" links request autoplay. */
+export function updateSpotifyAutoplay(enabled: boolean): Promise<AuthUser> {
+	return request('/auth/me/preferences', authUserSchema, {
+		method: 'PUT',
+		body: { spotifyAutoplay: enabled },
+		bodySchema: z.object({ spotifyAutoplay: z.boolean() })
+	});
 }

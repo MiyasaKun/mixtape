@@ -76,6 +76,11 @@ func (s *AuthService) CurrentUser(ctx context.Context, sessionID string) (domain
 	return s.users.ByID(ctx, session.UserID)
 }
 
+// SetSpotifyAutoplay stores whether “Open in Spotify” links should autoplay.
+func (s *AuthService) SetSpotifyAutoplay(ctx context.Context, userID string, enabled bool) error {
+	return s.users.UpdateSpotifyAutoplay(ctx, userID, enabled)
+}
+
 // SessionTTL is the configured lifetime for new sessions.
 func (s *AuthService) SessionTTL() time.Duration {
 	return s.sessionTTL

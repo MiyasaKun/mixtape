@@ -1,14 +1,18 @@
 <script lang="ts">
 	import { m } from '../../paraglide/messages.js';
-	import { user, setSpotifyConnected } from '#lib/stores/auth.js';
-	import { getSpotifyAuthUrl, disconnectSpotify } from '#lib/api/client.js';
+	import { user, setSpotifyConnected, setSpotifyAutoplay } from '#lib/stores/auth.js';
+	import { getSpotifyAuthUrl, disconnectSpotify, updateSpotifyAutoplay } from '#lib/api/client.js';
 
 	let busy = $state(false);
 	let error = $state('');
 	let confirmOpen = $state(false);
 	let dialogEl: HTMLDialogElement | undefined;
 
+	let autoplayBusy = $state(false);
+	let autoplayError = $state('');
+
 	const connected = $derived($user?.spotifyConnected ?? false);
+	const autoplay = $derived($user?.spotifyAutoplay ?? false);
 
 	$effect(() => {
 		if (!dialogEl) return;
@@ -44,6 +48,24 @@
 			busy = false;
 		}
 	}
+
+	async function toggleAutoplay(event: Event) {
+		if (autoplayBusy) return;
+		const input = event.currentTarget as HTMLInputElement;
+		autoplayBusy = true;
+		autoplayError = '';
+		try {
+			const updated = await updateSpotifyAutoplay(!autoplay);
+			setSpotifyAutoplay(updated.spotifyAutoplay);
+		} catch {
+			autoplayError = m.spotify_autoplay_error();
+			// The checkbox flipped natively on click; snap it back to the
+			// persisted state so it never lies about what was saved.
+			input.checked = autoplay;
+		} finally {
+			autoplayBusy = false;
+		}
+	}
 </script>
 
 <svelte:head><title>{m.settings_title()} · {m.app_title()}</title></svelte:head>
@@ -74,6 +96,29 @@
 
 			{#if error}
 				<p class="text-error mt-3" role="alert" aria-live="polite">{error}</p>
+			{/if}
+		</div>
+	</section>
+
+	<section class="card bg-base-100 shadow-xl" aria-labelledby="playback-heading">
+		<div class="card-body">
+			<h2 id="playback-heading" class="card-title">{m.playback_section_title()}</h2>
+			<label class="mt-1 flex cursor-pointer items-center gap-3" for="spotify-autoplay">
+				<input
+					id="spotify-autoplay"
+					type="checkbox"
+					class="toggle toggle-primary"
+					checked={autoplay}
+					onchange={toggleAutoplay}
+					disabled={autoplayBusy}
+					aria-busy={autoplayBusy}
+				/>
+				<span class="font-medium">{m.spotify_autoplay_label()}</span>
+			</label>
+			<p class="text-base-content/70 text-pretty">{m.spotify_autoplay_description()}</p>
+
+			{#if autoplayError}
+				<p class="text-error mt-3" role="alert" aria-live="polite">{autoplayError}</p>
 			{/if}
 		</div>
 	</section>

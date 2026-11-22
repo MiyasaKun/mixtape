@@ -31,6 +31,7 @@ type User struct {
 	Name             string
 	Picture          string
 	SpotifyConnected bool
+	SpotifyAutoplay  bool
 	Locale           string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time

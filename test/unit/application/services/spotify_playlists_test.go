@@ -39,7 +39,7 @@ func TestListPlaylistsFailsWhenSpotifyNotConnected(t *testing.T) {
 func TestListPlaylistsUsesFreshAccessToken(t *testing.T) {
 	store := connectedStore("u-1", baseTime.Add(time.Hour))
 	provider := &fakeSpotifyProvider{
-		playlists: domain.PlaylistPage{Items: []domain.Playlist{{ID: "pl-1", Name: "Focus"}}},
+		playlists: domain.PlaylistPage{Items: []domain.Playlist{{ID: "pl-1", Name: "Focus", Browseable: true}}},
 	}
 	svc := services.NewSpotifyIntegrationService(provider, store, fakeEncryptor{}, fakeNow)
 
@@ -135,6 +135,89 @@ func TestListPlaylistsRequiresReconnectWhenRefreshRejected(t *testing.T) {
 	}
 	if saved := store.conns["u-1"]; saved.AccessToken != "stored-access" {
 		t.Error("a rejected refresh must not overwrite the stored connection")
+	}
+}
+
+func TestListPlaylistsHidesUnbrowseablePlaylists(t *testing.T) {
+	store := connectedStore("u-1", baseTime.Add(time.Hour))
+	provider := &fakeSpotifyProvider{
+		playlists: domain.PlaylistPage{Items: []domain.Playlist{
+			{ID: "pl-owned", Name: "Owned", Browseable: true},
+			{ID: "pl-followed", Name: "Followed", Browseable: false},
+		}},
+	}
+	svc := services.NewSpotifyIntegrationService(provider, store, fakeEncryptor{}, fakeNow)
+
+	page, err := svc.ListPlaylists(context.Background(), "u-1", 0, 50)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "pl-owned" {
+		t.Fatalf("want only the browseable playlist, got %+v", page.Items)
+	}
+}
+
+func TestListPlaylistsSkipsPagesWithOnlyUnbrowseablePlaylists(t *testing.T) {
+	store := connectedStore("u-1", baseTime.Add(time.Hour))
+	provider := &fakeSpotifyProvider{
+		playlistPages: map[int]domain.PlaylistPage{
+			0: {Items: []domain.Playlist{
+				{ID: "pl-hidden-1", Browseable: false},
+				{ID: "pl-hidden-2", Browseable: false},
+			}, Next: intPtr(2)},
+			2: {Items: []domain.Playlist{{
+				ID: "pl-visible", Name: "Visible", Browseable: true,
+			}}},
+		},
+	}
+	svc := services.NewSpotifyIntegrationService(provider, store, fakeEncryptor{}, fakeNow)
+
+	page, err := svc.ListPlaylists(context.Background(), "u-1", 0, 50)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "pl-visible" {
+		t.Fatalf("want playlist from the second page, got %+v", page.Items)
+	}
+	if page.Next != nil {
+		t.Fatalf("want exhausted page, got next %d", *page.Next)
+	}
+	if provider.gotListOffset != 2 {
+		t.Errorf("want second page fetched at offset 2, got %d", provider.gotListOffset)
+	}
+}
+
+func intPtr(value int) *int { return &value }
+
+func TestListPlaylistsCapsSkippedHiddenPages(t *testing.T) {
+	store := connectedStore("u-1", baseTime.Add(time.Hour))
+	calls := 0
+	provider := &fakeSpotifyProvider{
+		// An upstream that always reports hidden playlists on an ever-
+		// advancing offset must not be followed forever.
+		playlistFn: func(offset int) (domain.PlaylistPage, error) {
+			calls++
+			next := offset + 1
+			return domain.PlaylistPage{
+				Items: []domain.Playlist{{ID: "hidden", Browseable: false}},
+				Next:  &next,
+			}, nil
+		},
+	}
+	svc := services.NewSpotifyIntegrationService(provider, store, fakeEncryptor{}, fakeNow)
+
+	page, err := svc.ListPlaylists(context.Background(), "u-1", 0, 50)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Items) != 0 {
+		t.Fatalf("want an empty visible page, got %+v", page.Items)
+	}
+	if page.Next == nil || *page.Next != 10 {
+		t.Fatalf("want the furthest known offset as next, got %v", page.Next)
+	}
+	if calls != 10 {
+		t.Errorf("want the page fetch loop capped at 10, got %d calls", calls)
 	}
 }
 

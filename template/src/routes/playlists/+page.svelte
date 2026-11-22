@@ -117,30 +117,19 @@ import { getLocale } from '../../paraglide/runtime.js';
 			</li>
 			{#each $resource.items as playlist (playlist.id)}
 				<li class="min-w-0">
-					{#if playlist.browseable}
-						<a
-							href={`/playlists/${playlist.id}`}
-							class="neu flex min-w-0 items-center gap-4 p-4 transition-transform touch-manipulation hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] motion-reduce:transform-none"
-						>
-							<CoverArt src={playlist.imageUrl} name={playlist.name} />
-							<span class="min-w-0">
-								<span class="block truncate font-semibold text-wrap-anywhere" title={playlist.name}>{playlist.name}</span>
-								<span class="block truncate text-sm text-base-content/70" title={playlist.owner}>{playlist.owner}</span>
-								{#if playlist.trackCount > 0}
-									<span class="block text-xs text-base-content/60">{trackCount(playlist.trackCount, getLocale())}</span>
-								{/if}
-							</span>
-						</a>
-					{:else}
-						<div class="neu flex items-center gap-4 p-4 opacity-70">
-							<CoverArt src={playlist.imageUrl} name={playlist.name} />
-							<span class="min-w-0">
-								<span class="block truncate font-semibold text-wrap-anywhere" title={playlist.name}>{playlist.name}</span>
-								<span class="block truncate text-sm text-base-content/70">{playlist.owner}</span>
-								<span class="block text-xs text-base-content/60">{m.playlists_not_browseable()}</span>
-							</span>
-						</div>
-					{/if}
+					<a
+						href={`/playlists/${playlist.id}`}
+						class="neu flex min-w-0 items-center gap-4 p-4 transition-transform touch-manipulation hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--neu-accent)] motion-reduce:transform-none"
+					>
+						<CoverArt src={playlist.imageUrl} name={playlist.name} />
+						<span class="min-w-0">
+							<span class="block truncate font-semibold text-wrap-anywhere" title={playlist.name}>{playlist.name}</span>
+							<span class="block truncate text-sm text-base-content/70" title={playlist.owner}>{playlist.owner}</span>
+							{#if playlist.trackCount > 0}
+								<span class="block text-xs text-base-content/60">{trackCount(playlist.trackCount, getLocale())}</span>
+							{/if}
+						</span>
+					</a>
 				</li>
 			{/each}
 		</ul>

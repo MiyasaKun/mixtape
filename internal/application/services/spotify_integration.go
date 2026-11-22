@@ -85,13 +85,48 @@ func (s *SpotifyIntegrationService) Status(ctx context.Context, userID string) (
 	return true, nil
 }
 
-// ListPlaylists returns a page of the user's followed and owned playlists.
+// ListPlaylists returns a page of the user's playlists that Mixtape can
+// actually browse. Playlists Spotify does not expose contents for are dropped
+// here so they never reach the web client. When a whole upstream page is
+// hidden the next page is fetched instead, keeping the visible list and the
+// reported `next` offset consistent.
 func (s *SpotifyIntegrationService) ListPlaylists(ctx context.Context, userID string, offset, limit int) (domain.PlaylistPage, error) {
 	conn, err := s.liveConnection(ctx, userID)
 	if err != nil {
 		return domain.PlaylistPage{}, err
 	}
-	return s.provider.ListPlaylists(ctx, conn.AccessToken, conn.SpotifyUserID, offset, limit)
+	return s.browseablePlaylists(ctx, conn.AccessToken, conn.SpotifyUserID, offset, limit)
+}
+
+// maxBrowseablePageFetches bounds how many consecutive all-hidden pages are
+// skipped in one request before the visible list is returned as-is.
+const maxBrowseablePageFetches = 10
+
+func (s *SpotifyIntegrationService) browseablePlaylists(ctx context.Context, accessToken, spotifyUserID string, offset, limit int) (domain.PlaylistPage, error) {
+	next := offset
+	for range maxBrowseablePageFetches {
+		page, err := s.provider.ListPlaylists(ctx, accessToken, spotifyUserID, next, limit)
+		if err != nil {
+			return domain.PlaylistPage{}, err
+		}
+
+		visible := make([]domain.Playlist, 0, len(page.Items))
+		for _, playlist := range page.Items {
+			if playlist.Browseable {
+				visible = append(visible, playlist)
+			}
+		}
+
+		if len(visible) > 0 || page.Next == nil || *page.Next <= next {
+			page.Items = visible
+			return page, nil
+		}
+		next = *page.Next
+	}
+
+	// The upstream kept reporting hidden pages; surface an empty page with the
+	// furthest known offset rather than looping indefinitely.
+	return domain.PlaylistPage{Items: nil, Next: &next}, nil
 }
 
 // ListLikedTracks returns a page of the user's Liked Songs.

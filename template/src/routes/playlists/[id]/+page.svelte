@@ -2,9 +2,11 @@
 	import { page } from '$app/state';
 	import { m } from '../../../paraglide/messages.js';
 	import { user } from '#lib/stores/auth.js';
-	import { getLikedTracks, getPlaylistTracks } from '#lib/api/client.js';
+	import { getLikedTracks, getPlaylistTracks, getActiveVoiceGuilds, queueSpotifyTrack, ApiError } from '#lib/api/client.js';
+	import type { ActiveGuild } from '#lib/api/client.js';
 	import { cachedPlaylist, createPagedResource } from '#lib/stores/playlists.js';
 	import CoverArt from '#lib/components/CoverArt.svelte';
+	import { spotifyUrl } from '#lib/utils/spotify.js';
 
 	const id = $derived(page.params.id ?? '');
 	const isLiked = $derived(id === 'liked');
@@ -41,6 +43,70 @@
 		observer.observe(sentinel);
 		return () => observer.disconnect();
 	});
+
+	// Guild picker: the song goes to a guild the bot is currently playing in.
+	type PickerStatus = 'idle' | 'loading' | 'ready' | 'error';
+	let guildPickerOpen = $state(false);
+	let guildDialogEl: HTMLDialogElement | undefined;
+	let guilds = $state<ActiveGuild[]>([]);
+	let guildsStatus = $state<PickerStatus>('idle');
+	let guildId = $state('');
+	let queueBusy = $state(false);
+	let queueMessage = $state('');
+	let queueError = $state('');
+
+	// A stale notice from a previous track must never look like it belongs to
+	// the newly selected one.
+	$effect(() => {
+		selectedId;
+		queueMessage = '';
+	});
+
+	$effect(() => {
+		if (!guildDialogEl) return;
+		if (guildPickerOpen) {
+			guildDialogEl.showModal();
+		} else {
+			guildDialogEl.close();
+		}
+	});
+
+	async function openGuildPicker() {
+		queueError = '';
+		guildId = '';
+		guildsStatus = 'loading';
+		guildPickerOpen = true;
+		try {
+			guilds = (await getActiveVoiceGuilds()).guilds;
+			guildId = guilds[0]?.id ?? '';
+			guildsStatus = 'ready';
+		} catch {
+			guilds = [];
+			guildsStatus = 'error';
+		}
+	}
+
+	async function sendToDiscord() {
+		const track = selected;
+		if (!track || !guildId || queueBusy) return;
+
+		queueBusy = true;
+		queueError = '';
+		try {
+			const result = await queueSpotifyTrack(guildId, track.url);
+			queueMessage = result.started
+				? m.playlists_queue_started({ title: result.title })
+				: m.playlists_queue_added({ position: result.position });
+			guildPickerOpen = false;
+		} catch (error) {
+			queueError =
+				error instanceof ApiError && error.status === 409
+					? m.playlists_bot_not_connected()
+					: m.playlists_queue_failed();
+		} finally {
+			queueBusy = false;
+		}
+	}
 
 	const heading = $derived(
 		isLiked ? m.playlists_liked() : (meta?.name ?? m.playlists_detail_title())
@@ -172,18 +238,12 @@
 							<p class="truncate text-xs text-base-content/60">{selected.album}</p>
 						{/if}
 						<div class="mt-3 flex flex-wrap items-center gap-3">
-							<button
-								type="button"
-								class="btn btn-primary"
-								disabled
-								title={m.playlists_playback_soon()}
-								aria-describedby="playback-soon"
-							>
+							<button type="button" class="btn btn-primary" onclick={openGuildPicker}>
 								{m.playlists_add_to_queue()}
 							</button>
 							{#if selected.url}
 								<a
-									href={selected.url}
+									href={spotifyUrl(selected.url, $user?.spotifyAutoplay ?? false)}
 									target="_blank"
 									rel="noopener noreferrer"
 									class="link link-primary text-sm"
@@ -194,10 +254,71 @@
 								{m.close()}
 							</button>
 						</div>
-						<p id="playback-soon" class="mt-2 text-xs text-base-content/60">{m.playlists_playback_soon()}</p>
+						{#if queueMessage}
+							<p class="mt-2 text-sm" role="status">{queueMessage}</p>
+						{/if}
 					</div>
 				</div>
 			</section>
 		{/if}
 	{/if}
 </div>
+
+<dialog
+	bind:this={guildDialogEl}
+	class="modal"
+	aria-labelledby="guild-picker-title"
+	onclose={() => (guildPickerOpen = false)}
+>
+	<div class="modal-box">
+		<h2 id="guild-picker-title" class="text-lg font-bold">{m.playlists_guild_picker_title()}</h2>
+		<p class="py-2 text-base-content/70 text-pretty">{m.playlists_guild_picker_description()}</p>
+
+		{#if guildsStatus === 'loading'}
+			<p class="text-base-content/70" aria-live="polite">{m.loading()}</p>
+		{:else if guildsStatus === 'error'}
+			<p class="text-error" role="alert">{m.playlists_queue_failed()}</p>
+		{:else if guilds.length === 0}
+			<p class="text-base-content/70" role="alert">{m.playlists_no_active_voice()}</p>
+		{:else}
+			<fieldset class="mt-2 space-y-2">
+				<legend class="sr-only">{m.playlists_guild_picker_legend()}</legend>
+				{#each guilds as guild (guild.id)}
+					<label
+						class="neu-sm flex cursor-pointer items-center gap-3 p-3 transition-colors has-checked:ring-2 has-checked:ring-[var(--neu-accent)]"
+					>
+						<input type="radio" name="guild-picker" value={guild.id} bind:group={guildId} class="radio radio-primary" />
+						<span class="min-w-0">
+							<span class="block truncate font-semibold">{guild.name || guild.id}</span>
+							{#if guild.name}
+								<span class="block truncate text-xs text-base-content/60">{guild.id}</span>
+							{/if}
+						</span>
+					</label>
+				{/each}
+			</fieldset>
+		{/if}
+
+		{#if queueError}
+			<p class="text-error mt-3" role="alert">{queueError}</p>
+		{/if}
+
+		<div class="modal-action">
+			<button type="button" class="btn" onclick={() => (guildPickerOpen = false)} disabled={queueBusy}>
+				{m.cancel()}
+			</button>
+			<button
+				type="button"
+				class="btn btn-primary"
+				onclick={sendToDiscord}
+				disabled={queueBusy || guildsStatus !== 'ready' || !guildId}
+				aria-busy={queueBusy}
+			>
+				{queueBusy ? m.playlists_queue_sending() : m.playlists_queue_confirm()}
+			</button>
+		</div>
+	</div>
+	<form method="dialog" class="modal-backdrop">
+		<button aria-label={m.cancel()}>{m.cancel()}</button>
+	</form>
+</dialog>

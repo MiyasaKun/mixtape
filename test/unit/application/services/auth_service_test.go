@@ -26,6 +26,17 @@ func (f *fakeUserRepo) UpsertByGoogleID(ctx context.Context, profile domain.Goog
 	return u, nil
 }
 
+func (f *fakeUserRepo) UpdateSpotifyAutoplay(ctx context.Context, id string, enabled bool) error {
+	for googleID, user := range f.users {
+		if user.ID == id {
+			user.SpotifyAutoplay = enabled
+			f.users[googleID] = user
+			return nil
+		}
+	}
+	return domain.ErrUserNotFound
+}
+
 func (f *fakeUserRepo) ByID(ctx context.Context, id string) (domain.User, error) {
 	for _, u := range f.users {
 		if u.ID == id {

@@ -72,6 +72,21 @@ func (r *UserRepository) ByID(ctx context.Context, id string) (domain.User, erro
 	return toDomainUser(record), nil
 }
 
+// UpdateSpotifyAutoplay persists the account-level autoplay preference.
+func (r *UserRepository) UpdateSpotifyAutoplay(ctx context.Context, id string, enabled bool) error {
+	result := r.db.WithContext(ctx).
+		Model(&userModel{}).
+		Where("id = ?", id).
+		Update("spotify_autoplay", enabled)
+	if result.Error != nil {
+		return fmt.Errorf("update spotify autoplay: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 func toDomainUser(m userModel) domain.User {
 	return domain.User{
 		ID:               m.ID,
@@ -81,6 +96,7 @@ func toDomainUser(m userModel) domain.User {
 		Picture:          m.Picture,
 		Locale:           m.Locale,
 		SpotifyConnected: m.Connection != nil,
+		SpotifyAutoplay:  m.SpotifyAutoplay,
 		CreatedAt:        m.CreatedAt,
 		UpdatedAt:        m.UpdatedAt,
 	}

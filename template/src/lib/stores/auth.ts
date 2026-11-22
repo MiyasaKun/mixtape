@@ -40,3 +40,8 @@ export async function signOut(): Promise<void> {
 export function setSpotifyConnected(connected: boolean): void {
 	user.update(($user) => ($user ? { ...$user, spotifyConnected: connected } : $user));
 }
+
+/** Applies the saved Spotify autoplay preference to the signed-in account. */
+export function setSpotifyAutoplay(enabled: boolean): void {
+	user.update(($user) => ($user ? { ...$user, spotifyAutoplay: enabled } : $user));
+}
